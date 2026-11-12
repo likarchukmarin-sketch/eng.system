@@ -159,12 +159,66 @@
   .sub-title { font-weight: 600; margin: 0 0 6px; color: var(--muted); font-size: .95rem; }
   .add-task { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 14px; }
   .add-task input[type="text"] { grid-column: 1 / -1; }
-  input[type="text"], input[type="email"], input[type="datetime-local"], input[type="date"], textarea {
+  input[type="text"], input[type="email"], input[type="datetime-local"], input[type="date"], input[type="time"], select, textarea {
     min-height: 44px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); width: 100%;
   }
   textarea { min-height: 110px; resize: vertical; }
   .add-task input[type="date"] { width: 100%; min-width: 0; }
   .check { width: 22px; height: 22px; accent-color: var(--green); margin-top: 2px; flex: none; }
+
+
+  /* ---------- навігація та розділи ---------- */
+  .topbar { flex-wrap: wrap; }
+  .nav { display: flex; gap: 4px; margin-left: 16px; flex: 1; }
+  .nav a { min-height: 44px; padding: 0 16px; border-radius: 12px; color: var(--muted); text-decoration: none; font-weight: 500; display: inline-flex; align-items: center; }
+  .nav a:hover { background: var(--surface-2); color: var(--ink); }
+  .nav a[aria-current="page"] { background: var(--green-soft); color: var(--green-deep); }
+  @media (max-width: 860px) { .nav { order: 3; flex-basis: 100%; margin: 0 -8px; overflow-x: auto; } }
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  .page-head .tag { margin-top: 8px; }
+  .head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .crumb { margin: 0 0 12px; }
+  .crumb a, .pay-who, .info a { color: var(--green-deep); text-underline-offset: 3px; }
+  .toolbar { display: grid; gap: 12px; margin-bottom: 18px; }
+  @media (min-width: 700px) { .toolbar { grid-template-columns: auto minmax(220px, 320px); justify-content: space-between; align-items: center; } }
+  .seg { display: inline-flex; gap: 4px; background: var(--surface-2); padding: 4px; border-radius: 14px; flex-wrap: wrap; }
+  .seg-btn { min-height: 40px; padding: 0 14px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-weight: 500; }
+  .seg-btn:hover { color: var(--ink); }
+  .seg-btn[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+  .person { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 8px; text-decoration: none; color: inherit; border-top: 1px solid var(--line); min-height: 64px; }
+  .people li:first-child .person { border-top: 0; }
+  .person:hover { background: var(--surface-2); }
+  .person-main { display: flex; flex-direction: column; min-width: 0; }
+  .person-name { font-weight: 600; font-size: 1.08rem; overflow-wrap: anywhere; }
+  .bal { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; text-align: right; }
+  .empty-row { padding: 18px 8px; }
+  .info { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 20px; margin: 0; }
+  .info dt { color: var(--muted); }
+  .info dd { margin: 0; overflow-wrap: anywhere; }
+  .links { display: inline-flex; gap: 6px 16px; flex-wrap: wrap; }
+  .prewrap { white-space: pre-wrap; }
+  .big-bal { font-family: var(--serif); font-size: 2rem; font-weight: 600; line-height: 1.2; }
+  .card-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); }
+  @media (max-width: 860px) { .card-grid { grid-template-columns: minmax(0, 1fr); } }
+  .pay-title { font-weight: 600; }
+  .pay-who { margin-left: 12px; font-weight: 400; }
+  .pay-side { text-align: right; flex: none; }
+  .pay-sum { font-family: var(--serif); font-size: 1.45rem; font-weight: 600; line-height: 1.2; font-variant-numeric: lining-nums; }
+  .pay-side .item-actions { justify-content: flex-end; }
+  .month-nav { display: flex; align-items: center; gap: 4px; margin-bottom: 18px; }
+  .month-nav .icon-btn { font-size: 1.6rem; line-height: 1; }
+  .month-label { min-width: 11rem; text-align: center; font-weight: 600; }
+  .month-total { display: flex; gap: 10px; align-items: baseline; margin: 0 0 8px; flex-wrap: wrap; }
+  .big-num { font-family: var(--serif); font-size: 2.1rem; font-weight: 600; font-variant-numeric: lining-nums; }
+  .month-total .lbl { color: var(--muted); }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .form-grid { grid-template-columns: 1fr; } }
+  .label-like { font-weight: 500; margin-bottom: 6px; }
+  .hint { color: var(--muted); font-size: .9rem; margin-top: 4px; }
+  .sched-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; gap: 8px; margin-bottom: 8px; }
+  .fixed-value { font-weight: 600; padding: 4px 0; }
+  .modal.wide { max-width: 600px; }
+  .field { margin-bottom: 0; }
 
   /* ---------- підсумок місяця ---------- */
   .summary { margin-top: 56px; padding: 16px 20px; background: var(--surface-2); border-radius: 16px; display: flex; flex-wrap: wrap; gap: 6px 28px; align-items: baseline; }
@@ -393,7 +447,7 @@
       else el.setAttribute(k, v === true ? '' : v);
     });
     for (var i = 2; i < arguments.length; i++) {
-      var kids = [].concat(arguments[i]);
+      var kids = [].concat(arguments[i]).flat(Infinity);
       for (var j = 0; j < kids.length; j++) {
         var kid = kids[j];
         if (kid == null || kid === false) continue;
@@ -414,7 +468,7 @@
 
   // ================= Стан і доступ до даних =================
   var sb = null;
-  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0 };
+  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7) };
   var app = document.getElementById('app');
 
   function must(res) { if (res.error) throw res.error; return res.data; }
@@ -464,7 +518,7 @@
     if (!sb || !S.session) return;
     S.loading = true; S.error = null;
     if (!opts || !opts.silent) render();
-    try { await loadAll(); }
+    try { await loadAll(); if (!S.noAccess) await loadRouteData(); }
     catch (e) { console.error(e); S.error = 'Не вдалося завантажити дані. Перевір інтернет і натисни «Оновити».'; }
     S.loading = false;
     render();
@@ -483,10 +537,10 @@
   }
   function fail(e) { console.error(e); toast('Не вдалося виконати дію. Перевір інтернет і спробуй ще раз.', { error: true }); }
 
-  function openModal(title, who, content) {
+  function openModal(title, who, content, opts) {
     var prevFocus = document.activeElement;
     var overlay = h('div', { class: 'overlay' });
-    var modal = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+    var modal = h('div', { class: 'modal' + (opts && opts.wide ? ' wide' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
       h('h2', { text: title }), who ? h('p', { class: 'who', text: who }) : null, content);
     overlay.append(modal);
     function close() {
@@ -636,6 +690,429 @@
   async function checkHw(l) { must(await sb.from('lessons').update({ homework_checked: true }).eq('id', l.id)); await refresh({ silent: true }); }
   async function finishTask(t) { must(await sb.from('tasks').update({ done: true }).eq('id', t.id)); await refresh({ silent: true }); }
 
+  // ================= Крок 3: маршрути, учні, оплати =================
+  function parseRoute() {
+    var parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+    if (parts[0] === 'students') return parts[1] ? { name: 'student', id: decodeURIComponent(parts[1]) } : { name: 'students' };
+    if (parts[0] === 'payments') return { name: 'payments' };
+    return { name: 'home' };
+  }
+  var WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'нд'];
+  var WEEKDAYS_FULL = ['Понеділок', 'Вівторок', 'Середа', 'Четвер', 'Пʼятниця', 'Субота', 'Неділя'];
+  var LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+  var STUDENT_STATUS = { active: 'Активні', paused: 'На паузі', ended: 'Завершили' };
+  var LESSON_STATUS_TEXT = { planned: 'Заплановано', done: 'Проведено', lost: 'Згоріло, списано', cancelled: 'Скасовано', rescheduled: 'Перенесено' };
+  var uidCounter = 0;
+
+  function fmtDMY(d) { var a = String(d).split('-'); return a[2] + '.' + a[1] + '.' + a[0]; }
+  function lessonPrice(total, count) { return count > 0 ? Math.round(Number(total) / count) : 0; }
+  function isHttpUrl(v) { return /^https?:\/\/\S+$/i.test(v); }
+  function scheduleText(sch) {
+    return (sch || []).slice().sort(function (a, b) { return a.weekday - b.weekday || String(a.time).localeCompare(String(b.time)); })
+      .map(function (x) { return WEEKDAYS[x.weekday - 1] + ' ' + x.time; }).join(', ');
+  }
+  function balanceOf(studentId) { return (S.balances || []).find(function (b) { return b.student_id === studentId; }) || null; }
+  function sel(options, value) {
+    var el = h('select', {}, options.map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
+    el.value = value == null ? '' : String(value);
+    return el;
+  }
+  function field(label, input, hint) {
+    var id = 'f' + (++uidCounter);
+    input.id = id;
+    return h('div', { class: 'field' }, h('label', { for: id, text: label }), input, hint ? h('div', { class: 'hint', text: hint }) : null);
+  }
+  function errBox() { return h('div', { class: 'msg err', role: 'alert', hidden: true }); }
+  function showErr(box, text) { box.textContent = text; box.hidden = false; box.scrollIntoView && box.scrollIntoView({ block: 'nearest' }); }
+  function todayStr() { return kyivDateStr(Date.now()); }
+  function page() { // обгортка сторінки розділу
+    var kids = [].slice.call(arguments);
+    return h('main', { class: 'page' }, S.error ? h('div', { class: 'msg err', role: 'alert', text: S.error }) : null, kids);
+  }
+  function balanceBadge(b) {
+    if (!b || (b.lessons_bought === 0 && b.lessons_used === 0)) return h('span', { class: 'item-sub', text: 'Без оплат' });
+    if (b.balance < 0) return h('span', { class: 'danger-text' }, icon('alert'), balanceText(b.balance));
+    var soon = b.balance <= S.settings.soon_pay_threshold;
+    return h('span', { class: 'bal' }, h('span', { text: balanceText(b.balance) }), soon ? h('span', { class: 'tag lost', text: 'скоро оплата' }) : null);
+  }
+
+  // ---------- завантаження даних поточного розділу ----------
+  async function loadRouteData() {
+    var route = S.route;
+    if (route.name === 'student') {
+      var id = route.id;
+      var r = await Promise.all([
+        sb.from('lessons').select('*').eq('student_id', id).order('starts_at', { ascending: false }).limit(200),
+        sb.from('packages').select('*').eq('student_id', id).order('purchased_at', { ascending: false })
+      ]);
+      var pk = must(r[1]) || [];
+      var pays = [];
+      if (pk.length) pays = must(await sb.from('payments').select('*').in('package_id', pk.map(function (p) { return p.id; }))) || [];
+      var les = must(r[0]) || [];
+      if (S.route !== route) return;
+      pays.sort(function (a, b) { return String(b.paid_at).localeCompare(String(a.paid_at)); });
+      S.card = { id: id, lessons: les, packages: pk, payments: pays };
+    } else if (route.name === 'payments') {
+      var month = S.payMonth;
+      var first = month + '-01';
+      var p = month.split('-').map(Number);
+      var nextFirst = addDaysStr(first, new Date(Date.UTC(p[0], p[1], 0)).getUTCDate());
+      var rows = must(await sb.from('payments').select('*').gte('paid_at', first).lt('paid_at', nextFirst).order('paid_at', { ascending: false })) || [];
+      var pkgs = [];
+      if (rows.length) pkgs = must(await sb.from('packages').select('*').in('id', rows.map(function (x) { return x.package_id; }))) || [];
+      if (S.route !== route || S.payMonth !== month) return;
+      var pkgMap = {};
+      pkgs.forEach(function (x) { pkgMap[x.id] = x; });
+      S.payData = { month: month, rows: rows, pkgMap: pkgMap };
+    }
+  }
+  function loadRouteSafely() {
+    return loadRouteData().then(render).catch(function (e) {
+      console.error(e); S.error = 'Не вдалося завантажити дані. Перевір інтернет і натисни «Оновити».'; render();
+    });
+  }
+  function onRouteChange() {
+    S.route = parseRoute(); S.card = null; S.payData = null; S.error = null;
+    try { window.scrollTo(0, 0); } catch (e) {}
+    render();
+    if (S.session && S.settings) loadRouteSafely();
+  }
+
+  // ---------- розділ «Учні» ----------
+  function renderStudents() {
+    var f = S.studentFilter;
+    var listBox = h('ul', { class: 'list people' });
+    var segBox = h('div', { class: 'seg', role: 'group', 'aria-label': 'Статус учнів' });
+    var search = h('input', { type: 'text', 'aria-label': 'Пошук за іменем', placeholder: 'Пошук за іменем', value: f.q, autocomplete: 'off' });
+    function draw() {
+      var q = f.q.trim().toLowerCase();
+      var rows = S.students.filter(function (s) { return s.status === f.status && (!q || (s.name || '').toLowerCase().indexOf(q) !== -1); })
+        .sort(function (a, b) { return (a.name || '').localeCompare(b.name || '', 'uk'); });
+      listBox.replaceChildren.apply(listBox, rows.length ? rows.map(function (s) {
+        return h('li', {}, h('a', { class: 'person', href: '#/students/' + encodeURIComponent(s.id) },
+          h('span', { class: 'person-main' }, h('span', { class: 'person-name', text: s.name }),
+            h('span', { class: 'item-sub', text: [s.level, s.contact].filter(Boolean).join(', ') })),
+          balanceBadge(balanceOf(s.id))));
+      }) : [h('li', { class: 'item-sub empty-row', text: q ? 'За цим іменем нікого не знайдено.' : (f.status === 'active' ? 'Активних учнів ще немає. Натисни «Новий учень».' : 'Тут поки порожньо.') })]);
+      segBox.replaceChildren.apply(segBox, Object.keys(STUDENT_STATUS).map(function (k) {
+        var n = S.students.filter(function (s) { return s.status === k; }).length;
+        return h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(f.status === k), text: STUDENT_STATUS[k] + ' ' + n, onclick: function () { f.status = k; draw(); } });
+      }));
+    }
+    search.addEventListener('input', function () { f.q = search.value; draw(); });
+    draw();
+    return page(
+      h('div', { class: 'page-head' }, h('h1', { text: 'Учні' }),
+        h('button', { class: 'btn primary', type: 'button', text: 'Новий учень', onclick: function () { openStudentForm(null); } })),
+      h('div', { class: 'toolbar' }, segBox, search),
+      listBox);
+  }
+
+  function openStudentForm(st) {
+    var isNew = !st;
+    var cur = st || { status: 'active', schedule: [] };
+    var err = errBox();
+    var name = h('input', { type: 'text', maxlength: '120', autocomplete: 'off' }); name.value = cur.name || '';
+    var contact = h('input', { type: 'text', maxlength: '200', placeholder: 'Telegram, телефон, Instagram', autocomplete: 'off' }); contact.value = cur.contact || '';
+    var status = sel([['active', 'Активний'], ['paused', 'На паузі'], ['ended', 'Завершив']], cur.status);
+    var level = sel([['', 'Не вказано']].concat(LEVELS.map(function (l) { return [l, l]; })), cur.level || '');
+    function urlInput(v) { var i = h('input', { type: 'text', placeholder: 'https://', autocomplete: 'off', inputmode: 'url' }); i.value = v || ''; return i; }
+    var board = urlInput(cur.board_url), chat = urlInput(cur.chat_url), mats = urlInput(cur.materials_url);
+    var bday = h('input', { type: 'date' }); bday.value = cur.birthday || '';
+    var start = h('input', { type: 'date' }); start.value = cur.start_date || '';
+    var dur = h('input', { type: 'text', inputmode: 'numeric', placeholder: 'за замовчуванням ' + (S.settings.default_duration_min || 50) }); dur.value = cur.lesson_duration_min || '';
+    var notes = h('textarea', {}); notes.value = cur.notes || '';
+
+    var sched = (cur.schedule || []).map(function (x) { return { weekday: x.weekday, time: x.time }; });
+    var schedBox = h('div', { class: 'sched' });
+    function drawSched() {
+      var rows = sched.map(function (row, i) {
+        var wd = sel(WEEKDAYS_FULL.map(function (n, k) { return [String(k + 1), n]; }), row.weekday);
+        wd.setAttribute('aria-label', 'День тижня');
+        wd.addEventListener('change', function () { row.weekday = Number(wd.value); });
+        var tm = h('input', { type: 'time', 'aria-label': 'Час' }); tm.value = row.time || '';
+        tm.addEventListener('change', function () { row.time = tm.value; });
+        return h('div', { class: 'sched-row' }, wd, tm,
+          h('button', { class: 'btn ghost small', type: 'button', text: 'Прибрати', onclick: function () { sched.splice(i, 1); drawSched(); } }));
+      });
+      rows.push(h('button', { class: 'btn ghost small', type: 'button', text: 'Додати день', onclick: function () { sched.push({ weekday: 1, time: '19:00' }); drawSched(); } }));
+      schedBox.replaceChildren.apply(schedBox, rows);
+    }
+    drawSched();
+
+    var close;
+    var save = actButton('primary', 'Зберегти', async function () {
+      err.hidden = true;
+      var n = name.value.trim(), c = contact.value.trim();
+      if (!n) { showErr(err, 'Вкажи імʼя учня.'); name.focus(); return; }
+      if (!c) { showErr(err, 'Вкажи контакт: Telegram, телефон або Instagram.'); contact.focus(); return; }
+      var urls = [[board, 'дошка'], [chat, 'чат'], [mats, 'матеріали']];
+      for (var i = 0; i < urls.length; i++) {
+        var v = urls[i][0].value.trim();
+        if (v && !isHttpUrl(v)) { showErr(err, 'Посилання «' + urls[i][1] + '» має починатися з https://'); urls[i][0].focus(); return; }
+      }
+      var d = dur.value.trim(), dn = null;
+      if (d) { dn = Number(d); if (!/^\d+$/.test(d) || dn < 10 || dn > 240) { showErr(err, 'Тривалість заняття: число хвилин від 10 до 240.'); dur.focus(); return; } }
+      for (var k = 0; k < sched.length; k++) { if (!/^\d{2}:\d{2}$/.test(sched[k].time || '')) { showErr(err, 'У постійному розкладі вкажи час для кожного дня.'); return; } }
+      var row = {
+        name: n, contact: c, status: status.value, level: level.value || null,
+        board_url: board.value.trim() || null, chat_url: chat.value.trim() || null, materials_url: mats.value.trim() || null,
+        birthday: bday.value || null, start_date: start.value || null, lesson_duration_min: dn,
+        notes: notes.value.trim() || null,
+        schedule: sched.map(function (x) { return { weekday: Number(x.weekday), time: x.time }; })
+          .sort(function (a, b) { return a.weekday - b.weekday || a.time.localeCompare(b.time); })
+      };
+      if (isNew) {
+        var created = must(await sb.from('students').insert(row).select().single());
+        close();
+        await refresh({ silent: true });
+        location.hash = '#/students/' + encodeURIComponent(created.id);
+        openFirstPaymentPrompt(created);
+      } else {
+        must(await sb.from('students').update(row).eq('id', st.id));
+        close(); await refresh({ silent: true }); toast('Зміни збережено.');
+      }
+    });
+    var content = h('div', { class: 'stack' }, err,
+      field('Імʼя', name), field('Контакт', contact),
+      h('div', { class: 'form-grid' }, field('Статус', status), field('Рівень', level)),
+      field('Дошка', board), field('Чат', chat), field('Матеріали', mats),
+      h('div', { class: 'form-grid' }, field('День народження', bday), field('Дата початку занять', start)),
+      field('Тривалість заняття, хв', dur),
+      h('div', { class: 'field' }, h('div', { class: 'label-like', text: 'Постійний розклад' }), h('div', { class: 'hint', text: 'Час за київським часом. Порожньо, якщо заняття вносяться вручну.' }), schedBox),
+      field('Нотатки', notes),
+      h('div', { class: 'slot-actions' }, save, h('button', { class: 'btn ghost', type: 'button', text: 'Скасувати', onclick: function () { close(); } })));
+    close = openModal(isNew ? 'Новий учень' : 'Змінити картку', isNew ? 'Обовʼязкові лише імʼя й контакт.' : cur.name, content, { wide: true });
+  }
+
+  function openFirstPaymentPrompt(student) {
+    var close;
+    var content = h('div', { class: 'stack' },
+      h('p', { class: 'note', text: 'Учня додано. Якщо він уже заплатив, внеси оплату зараз, інакше пропусти.' }),
+      h('button', { class: 'btn primary', type: 'button', text: 'Внести оплату', onclick: function () { close(); openPaymentForm({ studentId: student.id }); } }),
+      h('button', { class: 'btn ghost', type: 'button', text: 'Пропустити', onclick: function () { close(); } }));
+    close = openModal('Внести першу оплату?', student.name, content);
+  }
+
+  // ---------- картка учня ----------
+  function paymentRow(pay, pkg, showStudent) {
+    var count = pkg ? pkg.lessons_count : null;
+    var who = pkg ? S.studentMap[pkg.student_id] : null;
+    var sub = fmtDMY(pay.paid_at) + (count ? ', ' + money(lessonPrice(pay.amount, count)) + ' за заняття' : '') + (pay.note ? ', ' + pay.note : '');
+    var actions = h('div', { class: 'item-actions' });
+    if (pkg) {
+      actions.append(h('button', { class: 'btn link', type: 'button', text: 'Змінити', onclick: function () { openPaymentForm({ edit: { pay: pay, pkg: pkg } }); } }));
+      actions.append(h('button', { class: 'btn link', type: 'button', text: 'Видалити', onclick: function () { openDeletePayment(pay, pkg); } }));
+    }
+    return h('li', { class: 'item' },
+      h('div', { class: 'item-main' },
+        h('div', { class: 'pay-title' }, h('span', { text: count ? count + ' ' + lessonsWord(count) : 'Оплата' }),
+          showStudent && who ? h('a', { class: 'pay-who', href: '#/students/' + encodeURIComponent(who.id), text: who.name }) : null),
+        h('div', { class: 'item-sub', text: sub })),
+      h('div', { class: 'pay-side' }, h('div', { class: 'pay-sum', text: money(pay.amount) }), actions));
+  }
+
+  function renderStudentCard() {
+    var st = S.studentMap[S.route.id];
+    if (!st) return page(h('h1', { text: 'Учня не знайдено' }), h('p', { class: 'date-line' }, h('a', { href: '#/students', text: 'До списку учнів' })));
+    var b = balanceOf(st.id);
+    var info = h('dl', { class: 'info' });
+    function row(label, value) { if (value == null || value === '') return; info.append(h('dt', { text: label }), h('dd', {}, value)); }
+    row('Контакт', st.contact);
+    row('Рівень', st.level);
+    function link(url, label) { return url ? (isHttpUrl(url) ? h('a', { href: url, target: '_blank', rel: 'noopener noreferrer', text: label }) : h('span', { text: url })) : null; }
+    var links = [link(st.board_url, 'Дошка'), link(st.chat_url, 'Чат'), link(st.materials_url, 'Матеріали')].filter(Boolean);
+    if (links.length) row('Посилання', h('span', { class: 'links' }, links));
+    row('День народження', st.birthday ? fmtDMY(st.birthday) : null);
+    row('Початок занять', st.start_date ? fmtDMY(st.start_date) : null);
+    row('Постійний розклад', scheduleText(st.schedule));
+    row('Тривалість заняття', st.lesson_duration_min ? st.lesson_duration_min + ' хв' : null);
+    row('Нотатки', st.notes ? h('span', { class: 'prewrap', text: st.notes }) : null);
+
+    var balBox;
+    if (!b || (b.lessons_bought === 0 && b.lessons_used === 0)) balBox = h('p', { class: 'item-sub', text: 'Оплат і занять ще немає.' });
+    else balBox = h('div', {},
+      b.balance < 0 ? h('div', { class: 'danger-text big-bal' }, icon('alert'), balanceText(b.balance)) : h('div', { class: 'big-bal', text: balanceText(b.balance) }),
+      h('div', { class: 'item-sub', text: 'Куплено ' + b.lessons_bought + ', використано ' + b.lessons_used }));
+
+    var hist;
+    if (!S.card || S.card.id !== st.id) hist = [h('p', { class: 'skeleton', text: 'Завантаження історії…' })];
+    else {
+      var pkgMap = {}; S.card.packages.forEach(function (x) { pkgMap[x.id] = x; });
+      var pays = S.card.payments.length
+        ? h('ul', { class: 'list' }, S.card.payments.map(function (p) { return paymentRow(p, pkgMap[p.package_id], false); }))
+        : h('p', { class: 'item-sub', text: 'Оплат ще немає.' });
+      var les = S.card.lessons.length
+        ? h('ul', { class: 'list' }, S.card.lessons.map(function (l) {
+            var ms = new Date(l.starts_at).getTime();
+            return h('li', { class: 'item' },
+              h('div', { class: 'item-main' },
+                h('div', { text: fmtDMY(kyivDateStr(ms)) + ', ' + fmtTime(ms) }),
+                l.notes ? h('div', { class: 'item-sub prewrap', text: l.notes }) : null),
+              h('span', { class: 'tag ' + ((STATUS[l.status] || {}).cls || 'muted'), text: LESSON_STATUS_TEXT[l.status] || l.status }));
+          }))
+        : h('p', { class: 'item-sub', text: 'Занять ще немає.' });
+      hist = [
+        h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Оплати' })), pays),
+        h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Заняття' })), les)
+      ];
+    }
+    return page(
+      h('p', { class: 'crumb' }, h('a', { href: '#/students', text: 'Усі учні' })),
+      h('div', { class: 'page-head' },
+        h('div', {}, h('h1', { text: st.name }),
+          h('span', { class: 'tag ' + (st.status === 'active' ? 'ok' : 'muted'), text: ({ active: 'Активний', paused: 'На паузі', ended: 'Завершив' })[st.status] })),
+        h('div', { class: 'head-actions' },
+          h('button', { class: 'btn primary', type: 'button', text: 'Оплата', onclick: function () { openPaymentForm({ studentId: st.id }); } }),
+          h('button', { class: 'btn ghost', type: 'button', text: 'Змінити', onclick: function () { openStudentForm(st); } }))),
+      h('div', { class: 'grid card-grid' },
+        h('div', {}, h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Залишок' })), balBox),
+          h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Про учня' })), info.children.length ? info : h('p', { class: 'item-sub', text: 'Додаткових даних немає.' }))),
+        h('div', {}, hist)));
+  }
+
+  // ---------- оплати: форма, видалення ----------
+  async function lastPackage(studentId) {
+    var res = await sb.from('packages').select('*').eq('student_id', studentId).order('purchased_at', { ascending: false }).limit(1);
+    return res.error || !res.data || !res.data.length ? null : res.data[0];
+  }
+  async function suggestedSum(studentId, count) {
+    var res = await sb.from('packages').select('*').eq('student_id', studentId).eq('lessons_count', count).order('purchased_at', { ascending: false }).limit(1);
+    return res.error || !res.data || !res.data.length ? null : res.data[0].total_price;
+  }
+  function parseMoney(v) {
+    v = String(v).trim().replace(/\s/g, '').replace(',', '.');
+    return /^\d+(\.\d{1,2})?$/.test(v) ? Number(v) : NaN;
+  }
+
+  function openPaymentForm(o) {
+    o = o || {};
+    var edit = o.edit || null;
+    var fixedId = edit ? edit.pkg.student_id : (o.studentId || null);
+    var err = errBox();
+    var count = edit ? edit.pkg.lessons_count : 4;
+    var sumTouched = !!edit;
+    var student;
+    if (fixedId) {
+      student = h('div', { class: 'fixed-value', text: (S.studentMap[fixedId] || {}).name || '' });
+    } else {
+      var opts = [['', 'Обери учня']].concat(S.students.filter(function (s) { return s.status !== 'ended'; })
+        .sort(function (a, b) { return a.name.localeCompare(b.name, 'uk'); }).map(function (s) { return [s.id, s.name]; }));
+      student = sel(opts, '');
+    }
+    var studentId = function () { return fixedId || student.value || null; };
+    var counts = [1, 4, 8, 12];
+    if (counts.indexOf(count) === -1) counts.push(count);
+    var seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Кількість занять' });
+    var sum = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'Сума, грн', autocomplete: 'off' });
+    var perLesson = h('div', { class: 'hint' });
+    var date = h('input', { type: 'date' }); date.value = edit ? edit.pay.paid_at : todayStr();
+    var note = h('input', { type: 'text', maxlength: '200', autocomplete: 'off' }); note.value = edit ? (edit.pay.note || '') : '';
+    if (edit) sum.value = String(Number(edit.pay.amount));
+    function updatePer() {
+      var a = parseMoney(sum.value);
+      perLesson.textContent = isNaN(a) || !count ? '' : 'Ціна заняття: ' + money(lessonPrice(a, count));
+    }
+    function drawSeg() {
+      seg.replaceChildren.apply(seg, counts.map(function (n) {
+        return h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(n === count), text: n + ' ' + lessonsWord(n),
+          onclick: async function () {
+            count = n; drawSeg(); updatePer();
+            var id = studentId();
+            if (id && !sumTouched) {
+              var s = await suggestedSum(id, n);
+              if (s != null && count === n && !sumTouched) { sum.value = String(Number(s)); updatePer(); }
+            }
+          } });
+      }));
+    }
+    sum.addEventListener('input', function () { sumTouched = true; updatePer(); });
+    async function applyDefaults() {
+      var id = studentId();
+      if (!id || edit) return;
+      var pk = await lastPackage(id);
+      if (pk && !sumTouched) {
+        if (counts.indexOf(pk.lessons_count) === -1) counts.push(pk.lessons_count);
+        count = pk.lessons_count; sum.value = String(Number(pk.total_price)); drawSeg(); updatePer();
+      }
+    }
+    if (student.tagName === 'SELECT') student.addEventListener('change', function () { sumTouched = false; sum.value = ''; applyDefaults(); });
+    drawSeg(); updatePer();
+
+    var close;
+    var save = actButton('primary', 'Зберегти оплату', async function () {
+      err.hidden = true;
+      var id = studentId();
+      if (!id) { showErr(err, 'Обери учня.'); return; }
+      var amount = parseMoney(sum.value);
+      if (isNaN(amount) || amount <= 0) { showErr(err, 'Вкажи суму в гривнях, наприклад 2200.'); sum.focus(); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date.value)) { showErr(err, 'Вкажи дату оплати.'); return; }
+      var noteVal = note.value.trim() || null;
+      if (edit) {
+        must(await sb.rpc('update_payment', { p_payment_id: edit.pay.id, p_lessons_count: count, p_amount: amount, p_paid_at: date.value, p_note: noteVal }));
+      } else {
+        must(await sb.rpc('add_payment', { p_student_id: id, p_lessons_count: count, p_amount: amount, p_paid_at: date.value, p_note: noteVal }));
+      }
+      close();
+      await refresh({ silent: true });
+      var b = balanceOf(id);
+      toast((edit ? 'Оплату змінено.' : 'Оплату внесено.') + (b ? ' ' + balanceText(b.balance) + '.' : ''));
+    });
+    var content = h('div', { class: 'stack' }, err,
+      h('div', { class: 'field' }, h('div', { class: 'label-like', text: 'Учень' }), student),
+      h('div', { class: 'field' }, h('div', { class: 'label-like', text: 'Абонемент' }), seg),
+      field('Сума, грн', sum), perLesson,
+      field('Дата оплати', date),
+      field('Коментар', note),
+      h('div', { class: 'slot-actions' }, save, h('button', { class: 'btn ghost', type: 'button', text: 'Скасувати', onclick: function () { close(); } })));
+    close = openModal(edit ? 'Змінити оплату' : 'Нова оплата', null, content, { wide: true });
+    applyDefaults().catch(function (e) { console.error(e); });
+  }
+
+  function openDeletePayment(pay, pkg) {
+    var close;
+    var who = (S.studentMap[pkg.student_id] || {}).name || '';
+    var del = actButton('danger', 'Видалити оплату', async function () {
+      must(await sb.rpc('delete_payment', { p_payment_id: pay.id }));
+      close(); await refresh({ silent: true });
+      var b = balanceOf(pkg.student_id);
+      toast('Оплату видалено.' + (b ? ' ' + balanceText(b.balance) + '.' : ''));
+    });
+    close = openModal('Видалити оплату?', who + ', ' + fmtDMY(pay.paid_at) + ', ' + money(pay.amount),
+      h('div', { class: 'stack' },
+        h('p', { class: 'note bad', text: 'Разом з оплатою зникнуть ' + pkg.lessons_count + ' ' + lessonsWord(pkg.lessons_count) + ' з залишку учня. Це не можна скасувати.' }),
+        del, h('button', { class: 'btn ghost', type: 'button', text: 'Не видаляти', onclick: function () { close(); } })));
+  }
+
+  // ---------- розділ «Оплати» ----------
+  function shiftMonth(ym, delta) {
+    var p = ym.split('-').map(Number);
+    var d = new Date(Date.UTC(p[0], p[1] - 1 + delta, 1));
+    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1);
+  }
+  function renderPaymentsPage() {
+    var p = S.payMonth.split('-').map(Number);
+    var label = new Intl.DateTimeFormat('uk-UA', { timeZone: 'UTC', month: 'long', year: 'numeric' }).format(new Date(Date.UTC(p[0], p[1] - 1, 1)));
+    function go(delta) { S.payMonth = shiftMonth(S.payMonth, delta); S.payData = null; render(); loadRouteSafely(); }
+    var nav = h('div', { class: 'month-nav' },
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Попередній місяць', text: '‹', onclick: function () { go(-1); } }),
+      h('span', { class: 'month-label', text: label }),
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Наступний місяць', text: '›', onclick: function () { go(1); } }));
+    var body;
+    if (!S.payData || S.payData.month !== S.payMonth) body = h('p', { class: 'skeleton', text: 'Завантаження…' });
+    else {
+      var rows = S.payData.rows, total = rows.reduce(function (s, x) { return s + Number(x.amount); }, 0);
+      body = rows.length ? [
+        h('p', { class: 'month-total' }, h('span', { class: 'big-num', text: money(total) }), h('span', { class: 'lbl', text: 'за місяць, оплат: ' + rows.length })),
+        h('ul', { class: 'list' }, rows.map(function (x) { return paymentRow(x, S.payData.pkgMap[x.package_id], true); }))
+      ] : h('p', { class: 'item-sub', text: 'У цьому місяці оплат немає.' });
+    }
+    return page(
+      h('div', { class: 'page-head' }, h('h1', { text: 'Оплати' }),
+        h('button', { class: 'btn primary', type: 'button', text: 'Нова оплата', onclick: function () { openPaymentForm({}); } })),
+      nav, body);
+  }
+
   // ================= Малювання =================
   var STATUS = {
     done: { label: 'Проведено', cls: 'ok', ic: 'check' },
@@ -783,7 +1260,11 @@
       }
     }, icon(dark ? 'sun' : 'moon')));
     if (withTools) tools.append(h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Вийти', onclick: signOut }, icon('out'), h('span', { text: 'Вийти' })));
-    return h('header', { class: 'topbar' }, h('div', { class: 'brand', text: 'Мій CRM' }), tools);
+    var cur = S.route.name === 'student' ? 'students' : S.route.name;
+    var nav = withTools ? h('nav', { class: 'nav', 'aria-label': 'Розділи' }, [['home', 'Головна', '#/'], ['students', 'Учні', '#/students'], ['payments', 'Оплати', '#/payments']].map(function (n) {
+      return h('a', { href: n[2], 'aria-current': cur === n[0] ? 'page' : null, text: n[1] });
+    })) : null;
+    return h('header', { class: 'topbar' }, h('div', { class: 'brand', text: 'Мій CRM' }), nav, tools);
   }
 
   function renderLogin(message) {
@@ -815,14 +1296,23 @@
       app.replaceChildren(topbar(true), h('main', { class: 'center' }, h('h1', { text: S.error ? 'Помилка' : 'Завантаження' }), S.error ? h('div', { class: 'msg err', text: S.error }) : h('p', { text: 'Читаю дані…' })));
       return;
     }
+    var view;
+    switch (S.route.name) {
+      case 'students': view = renderStudents(); break;
+      case 'student': view = renderStudentCard(); break;
+      case 'payments': view = renderPaymentsPage(); break;
+      default: view = renderHome();
+    }
+    app.replaceChildren(topbar(true), view);
+  }
+
+  function renderHome() {
     var left = h('div', {}, renderToday());
     var right = h('div', {}, renderTasks(), renderPayments(), renderBirthdays());
-    app.replaceChildren(
-      topbar(true),
-      h('main', { class: 'page' },
-        S.error ? h('div', { class: 'msg err', role: 'alert', text: S.error }) : null,
-        h('div', { class: 'grid' }, left, right),
-        renderSummary()));
+    return h('main', { class: 'page' },
+      S.error ? h('div', { class: 'msg err', role: 'alert', text: S.error }) : null,
+      h('div', { class: 'grid' }, left, right),
+      renderSummary());
   }
 
   async function signOut() { await sb.auth.signOut(); S.settings = null; render(); }
@@ -837,6 +1327,7 @@
     var res = await sb.auth.getSession();
     S.session = res.data && res.data.session;
     S.ready = true;
+    window.addEventListener('hashchange', onRouteChange);
     sb.auth.onAuthStateChange(function (event, session) {
       var had = !!S.session;
       S.session = session;
