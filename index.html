@@ -220,6 +220,11 @@
   .modal.wide { max-width: 600px; }
   .field { margin-bottom: 0; }
 
+  .page.narrow { max-width: 760px; }
+  .stats-row { display: flex; gap: 8px 36px; flex-wrap: wrap; margin: 0 0 14px; }
+  .stat .big-num { display: block; font-size: 1.8rem; line-height: 1.2; }
+  .stat .lbl { color: var(--muted); }
+  .space-top { margin-top: 16px; }
   .day { margin-bottom: 30px; }
   .day-title { font-size: 1.45rem; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
   .day.today .day-title { color: var(--green-deep); }
@@ -399,12 +404,21 @@
         });
       }
     });
+    // 5б. Витрати, що чекають підтвердження суми
+    (s.pendingExpenses || []).forEach(function (e) {
+      out.push({ key: 'exp-' + e.id, type: 'expense', expense: e, text: 'Підтверди витрату ' + (e.description || CATEGORIES[e.category] || e.category), sub: fmtDMY(e.spent_at) + ', ' + money(e.amount) });
+    });
     // 6. Кінець місяця
     var t = today.split('-').map(Number);
     var lastDay = new Date(Date.UTC(t[0], t[1], 0)).getUTCDate();
     var hasActive = s.students.some(function (x) { return x.status === 'active'; });
     if (hasActive && t[2] >= lastDay - 2) {
       out.push({ key: 'summaries', type: 'summaries', text: 'Допиши підсумки учнів', sub: 'Кінець місяця' });
+    }
+    // 6б. Резервна копія раз на тиждень
+    var lastBackup = s.settings.last_backup_at ? new Date(s.settings.last_backup_at).getTime() : 0;
+    if (!lastBackup || Date.now() - lastBackup >= 7 * 86400000) {
+      out.push({ key: 'backup', type: 'backup', text: 'Збережи резервну копію', sub: lastBackup ? 'Остання: ' + fmtDMY(kyivDateStr(lastBackup)) : 'Копій ще не було' });
     }
     // 7. Ручні завдання
     s.manualTasks.forEach(function (m) {
@@ -474,7 +488,7 @@
 
   // ================= Стан і доступ до даних =================
   var sb = null;
-  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7), schedWeek: mondayOf(kyivDateStr(Date.now())), weekData: null, genAt: 0, scheduleError: false };
+  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7), schedWeek: mondayOf(kyivDateStr(Date.now())), weekData: null, genAt: 0, scheduleError: false, expMonth: kyivDateStr(Date.now()).slice(0, 7), expData: null, setData: null, genExpAt: 0, recurringError: false };
   var app = document.getElementById('app');
 
   function must(res) { if (res.error) throw res.error; return res.data; }
@@ -496,7 +510,8 @@
       sb.from('tasks').select('*').eq('done', false).order('due_date', { ascending: true, nullsFirst: false }),
       sb.from('tax_deadlines').select('*').gte('due_date', today).lte('due_date', addDaysStr(today, 30)).order('due_date', { ascending: true }),
       sb.from('stats_month').select('*').eq('month', monthFirst).maybeSingle(),
-      sb.from('lessons').select('*').eq('status', 'planned').gte('starts_at', iso(range.end)).order('starts_at', { ascending: true }).limit(1)
+      sb.from('lessons').select('*').eq('status', 'planned').gte('starts_at', iso(range.end)).order('starts_at', { ascending: true }).limit(1),
+      sb.from('expenses').select('*').eq('status', 'pending').lte('spent_at', today).order('spent_at', { ascending: true })
     ]);
     var settingsRes = r[0];
     if (settingsRes.error) throw settingsRes.error;
@@ -514,6 +529,7 @@
     next.deadlines = must(r[7]) || [];
     next.month = r[8].error ? null : r[8].data;
     next.nextLesson = (must(r[9]) || [])[0] || null;
+    next.pendingExpenses = r[10].error ? [] : (r[10].data || []);
     next.todayStr = today;
     next.loadedAt = nowTs;
     next.noAccess = false;
@@ -524,7 +540,7 @@
     if (!sb || !S.session) return;
     S.loading = true; S.error = null;
     if (!opts || !opts.silent) render();
-    try { await generateSchedule(null, false); await loadAll(); if (!S.noAccess) await loadRouteData(); }
+    try { await generateSchedule(null, false); await generateRecurring(false); await loadAll(); if (!S.noAccess) await loadRouteData(); }
     catch (e) { console.error(e); S.error = 'Не вдалося завантажити дані. Перевір інтернет і натисни «Оновити».'; }
     S.loading = false;
     render();
@@ -707,6 +723,8 @@
     if (parts[0] === 'students') return parts[1] ? { name: 'student', id: decodeURIComponent(parts[1]) } : { name: 'students' };
     if (parts[0] === 'payments') return { name: 'payments' };
     if (parts[0] === 'schedule') return { name: 'schedule' };
+    if (parts[0] === 'expenses') return { name: 'expenses' };
+    if (parts[0] === 'settings') return { name: 'settings' };
     return { name: 'home' };
   }
   var WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'нд'];
@@ -785,15 +803,32 @@
         .order('starts_at', { ascending: true })) || [];
       if (S.route !== route || S.schedWeek !== wk) return;
       S.weekData = { week: wk, lessons: wkRows };
+    } else if (route.name === 'expenses') {
+      var em = S.expMonth, ef = em + '-01', ep = em.split('-').map(Number);
+      var enext = addDaysStr(ef, new Date(Date.UTC(ep[0], ep[1], 0)).getUTCDate());
+      var erows = must(await sb.from('expenses').select('*').gte('spent_at', ef).lt('spent_at', enext).order('spent_at', { ascending: false })) || [];
+      if (S.route !== route || S.expMonth !== em) return;
+      S.expData = { month: em, rows: erows };
+    } else if (route.name === 'settings') {
+      var r2 = await Promise.all([
+        sb.from('tax_deadlines').select('*').order('due_date', { ascending: true }),
+        sb.from('expenses').select('*').gte('series_index', 0)
+      ]);
+      var dl = must(r2[0]) || [];
+      if (r2[1].error) throw r2[1].error;
+      if (S.route !== route) return;
+      S.setData = { deadlines: dl, series: r2[1].data || [] };
     }
   }
   function loadRouteSafely() {
     return loadRouteData().then(render).catch(function (e) {
-      console.error(e); S.error = 'Не вдалося завантажити дані. Перевір інтернет і натисни «Оновити».'; render();
+      console.error(e);
+      S.error = e && (e.code === '42703' || /series_index|series_id|last_backup/.test(e.message || '')) ? MIGRATION7 : 'Не вдалося завантажити дані. Перевір інтернет і натисни «Оновити».';
+      render();
     });
   }
   function onRouteChange() {
-    S.route = parseRoute(); S.card = null; S.payData = null; S.weekData = null; S.error = null;
+    S.route = parseRoute(); S.card = null; S.payData = null; S.weekData = null; S.expData = null; S.setData = null; S.error = null;
     try { window.scrollTo(0, 0); } catch (e) {}
     render();
     if (S.session && S.settings) loadRouteSafely();
@@ -1346,6 +1381,277 @@
       nav, body);
   }
 
+  // ================= Крок 5: налаштування, витрати, резервна копія =================
+  var CATEGORIES = { taxes: 'Податки', subscriptions: 'Підписки', education: 'Навчання', materials: 'Матеріали', other: 'Інше' };
+  var RECUR = { none: 'Не повторюється', monthly: 'Щомісяця', quarterly: 'Щокварталу' };
+  var MIGRATION7 = 'Спершу запусти файл 07_expenses.sql у Supabase.';
+  function uuid() {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) { var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+  }
+
+  // Регулярні витрати: записи «очікується» створює функція в базі
+  async function generateRecurring(force) {
+    if (!force && Date.now() - S.genExpAt < 60000) return 0;
+    S.genExpAt = Date.now();
+    var res = await sb.rpc('generate_recurring_expenses', {});
+    if (res.error) { console.warn(res.error); S.recurringError = true; return null; }
+    S.recurringError = false;
+    return res.data || 0;
+  }
+
+  // ---------- резервна копія ----------
+  var BACKUP_TABLES = ['settings', 'students', 'packages', 'payments', 'lessons', 'expenses', 'tasks', 'tax_deadlines', 'monthly_summaries'];
+  async function fetchAllRows(table) {
+    var out = [], from = 0, size = 1000;
+    for (;;) {
+      var page = must(await sb.from(table).select('*').order('id', { ascending: true }).range(from, from + size - 1)) || [];
+      out = out.concat(page);
+      if (page.length < size) return out;
+      from += size;
+    }
+  }
+  async function saveBackup() {
+    var tables = {};
+    for (var i = 0; i < BACKUP_TABLES.length; i++) tables[BACKUP_TABLES[i]] = await fetchAllRows(BACKUP_TABLES[i]);
+    var nowIso = new Date().toISOString();
+    var payload = { app: 'my-crm', created_at: nowIso, tables: tables };
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'crm-backup-' + todayStr() + '.json';
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    must(await sb.from('settings').update({ last_backup_at: nowIso }).eq('id', 1));
+    await refresh({ silent: true });
+    toast('Копію збережено у файл ' + a.download + '. Зберігай його в надійному місці.', { ms: 9000 });
+  }
+
+  // ---------- витрати ----------
+  function expenseRow(e) {
+    var series = e.series_id && e.recurrence !== 'none';
+    var actions = h('div', { class: 'item-actions' });
+    if (e.status === 'pending') actions.append(h('button', { class: 'btn primary small', type: 'button', text: 'Підтвердити', onclick: function () { openConfirmExpense(e); } }));
+    actions.append(h('button', { class: 'btn link', type: 'button', text: 'Змінити', onclick: function () { openExpenseForm({ edit: e }); } }));
+    if (!series) actions.append(h('button', { class: 'btn link', type: 'button', text: 'Видалити', onclick: function () { openDeleteExpense(e); } }));
+    return h('li', { class: 'item' },
+      h('div', { class: 'item-main' },
+        h('div', { class: 'pay-title' }, h('span', { text: e.description || CATEGORIES[e.category] || e.category }),
+          e.status === 'pending' ? h('span', { class: 'tag lost pay-who', text: 'очікується' }) : null,
+          series ? h('span', { class: 'tag muted pay-who', text: RECUR[e.recurrence].toLowerCase() }) : null),
+        h('div', { class: 'item-sub', text: fmtDMY(e.spent_at) + ', ' + (CATEGORIES[e.category] || e.category) })),
+      h('div', { class: 'pay-side' }, h('div', { class: 'pay-sum', text: money(e.amount) }), actions));
+  }
+
+  function openExpenseForm(o) {
+    o = o || {};
+    var edit = o.edit || null;
+    var inSeries = !!(edit && edit.series_id);
+    var err = errBox();
+    var date = h('input', { type: 'date' }); date.value = edit ? edit.spent_at : todayStr();
+    var category = sel(Object.keys(CATEGORIES).map(function (k) { return [k, CATEGORIES[k]]; }), edit ? edit.category : 'subscriptions');
+    var amount = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: 'Сума, грн' }); amount.value = edit ? String(Number(edit.amount)) : '';
+    var desc = h('input', { type: 'text', maxlength: '200', autocomplete: 'off', placeholder: 'Наприклад: Claude, вебінар з TBL' }); desc.value = edit && edit.description ? edit.description : '';
+    var status = sel([['paid', 'Сплачено'], ['pending', 'Очікується']], edit ? edit.status : 'paid');
+    var recur = sel(Object.keys(RECUR).map(function (k) { return [k, RECUR[k]]; }), edit ? (edit.recurrence || 'none') : 'none');
+    if (inSeries) recur.disabled = true;
+    var close;
+    var save = actButton('primary', 'Зберегти', async function () {
+      err.hidden = true;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date.value)) { showErr(err, 'Вкажи дату.'); date.focus(); return; }
+      var a = parseMoney(amount.value);
+      if (isNaN(a) || a <= 0) { showErr(err, 'Вкажи суму в гривнях, наприклад 800.'); amount.focus(); return; }
+      var row = { spent_at: date.value, category: category.value, amount: a, description: desc.value.trim() || null, status: status.value };
+      if (edit) {
+        if (!inSeries && recur.value !== 'none') Object.assign(row, { recurrence: recur.value, series_id: edit.id, series_index: 0, series_anchor: date.value });
+        must(await sb.from('expenses').update(row).eq('id', edit.id));
+      } else {
+        var id = uuid();
+        Object.assign(row, { id: id, recurrence: recur.value });
+        if (recur.value !== 'none') Object.assign(row, { series_id: id, series_index: 0, series_anchor: date.value });
+        var res = await sb.from('expenses').insert(row);
+        if (res.error) throw res.error;
+      }
+      close();
+      if (S.route.name === 'expenses') { S.expMonth = date.value.slice(0, 7); S.expData = null; }
+      await refresh({ silent: true });
+      var made = recur.value !== 'none' && !edit ? await generateRecurring(true) : 0;
+      if (made) await refresh({ silent: true });
+      toast(edit ? 'Витрату змінено.' : 'Витрату додано.' + (made ? ' Створено ' + made + ' ' + plural(made, 'запис', 'записи', 'записів') + ' «очікується» за минулі періоди.' : ''));
+    });
+    var content = h('div', { class: 'stack' }, err,
+      h('div', { class: 'form-grid' }, field('Дата', date), field('Категорія', category)),
+      field('Сума, грн', amount),
+      field('Опис', desc),
+      h('div', { class: 'form-grid' }, field('Стан', status), field('Повторення', recur, inSeries ? 'Регулярну витрату зупиняють у Налаштуваннях.' : 'Регулярні витрати CRM створює сама зі станом «очікується».')),
+      h('div', { class: 'slot-actions' }, save, h('button', { class: 'btn ghost', type: 'button', text: 'Скасувати', onclick: function () { close(); } })));
+    close = openModal(edit ? 'Змінити витрату' : 'Нова витрата', null, content, { wide: true });
+  }
+
+  function openConfirmExpense(e) {
+    var err = errBox();
+    var amount = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off' }); amount.value = String(Number(e.amount));
+    var close;
+    var ok = actButton('primary', 'Підтвердити', async function () {
+      err.hidden = true;
+      var a = parseMoney(amount.value);
+      if (isNaN(a)) { showErr(err, 'Вкажи фактичну суму в гривнях.'); amount.focus(); return; }
+      must(await sb.from('expenses').update({ status: 'paid', amount: a }).eq('id', e.id));
+      close(); await refresh({ silent: true }); toast('Витрату підтверджено: ' + money(a) + '.');
+    });
+    close = openModal('Підтвердити витрату', (e.description || CATEGORIES[e.category]) + ', ' + fmtDMY(e.spent_at),
+      h('div', { class: 'stack' }, err, field('Фактична сума, грн', amount, 'Якщо цього разу платити не довелось, вкажи 0.'),
+        h('div', { class: 'slot-actions' }, ok, h('button', { class: 'btn ghost', type: 'button', text: 'Закрити', onclick: function () { close(); } }))));
+  }
+
+  function openDeleteExpense(e) {
+    var close;
+    var del = actButton('danger', 'Видалити витрату', async function () {
+      must(await sb.from('expenses').delete().eq('id', e.id));
+      close(); await refresh({ silent: true }); toast('Витрату видалено.');
+    });
+    close = openModal('Видалити витрату?', (e.description || CATEGORIES[e.category]) + ', ' + fmtDMY(e.spent_at) + ', ' + money(e.amount),
+      h('div', { class: 'stack' }, h('p', { class: 'note bad', text: 'Витрату буде видалено остаточно, статистика перерахується.' }),
+        del, h('button', { class: 'btn ghost', type: 'button', text: 'Не видаляти', onclick: function () { close(); } })));
+  }
+
+  function renderExpensesPage() {
+    var p = S.expMonth.split('-').map(Number);
+    var label = new Intl.DateTimeFormat('uk-UA', { timeZone: 'UTC', month: 'long', year: 'numeric' }).format(new Date(Date.UTC(p[0], p[1] - 1, 1)));
+    function go(delta) { S.expMonth = shiftMonth(S.expMonth, delta); S.expData = null; render(); loadRouteSafely(); }
+    var nav = h('div', { class: 'month-nav' },
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Попередній місяць', text: '‹', onclick: function () { go(-1); } }),
+      h('span', { class: 'month-label', text: label }),
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Наступний місяць', text: '›', onclick: function () { go(1); } }));
+    var body;
+    if (!S.expData || S.expData.month !== S.expMonth) body = h('p', { class: 'skeleton', text: 'Завантаження…' });
+    else {
+      var rows = S.expData.rows, sum = function (f) { return rows.filter(f).reduce(function (s, x) { return s + Number(x.amount); }, 0); };
+      var spent = sum(function (x) { return x.status === 'paid' && x.category !== 'taxes'; });
+      var taxes = sum(function (x) { return x.status === 'paid' && x.category === 'taxes'; });
+      var pend = sum(function (x) { return x.status === 'pending'; });
+      function stat(lbl, val) { return h('div', { class: 'stat' }, h('div', { class: 'big-num', text: val }), h('div', { class: 'lbl', text: lbl })); }
+      body = rows.length ? [
+        h('div', { class: 'stats-row' }, stat('Витрати', money(spent)), stat('Податки сплачено', money(taxes)), pend > 0 ? stat('Очікується', money(pend)) : null),
+        h('ul', { class: 'list' }, rows.map(expenseRow))
+      ] : h('p', { class: 'item-sub', text: 'У цьому місяці витрат немає.' });
+    }
+    return page(
+      h('div', { class: 'page-head' }, h('h1', { text: 'Витрати' }), h('button', { class: 'btn primary', type: 'button', text: 'Нова витрата', onclick: function () { openExpenseForm({}); } })),
+      S.recurringError ? h('div', { class: 'msg err', role: 'alert', text: 'Регулярні витрати не створюються автоматично. ' + MIGRATION7 }) : null,
+      nav, body);
+  }
+
+  // ---------- налаштування ----------
+  function openStopSeries(row) {
+    var close;
+    var go = actButton('danger', 'Прибрати зі списку регулярних', async function () {
+      must(await sb.from('expenses').update({ recurrence: 'none' }).eq('series_id', row.series_id));
+      close(); await refresh({ silent: true }); toast('Нові записи для цієї витрати створюватись не будуть.');
+    });
+    close = openModal('Зупинити регулярну витрату?', (row.description || CATEGORIES[row.category]) + ', ' + RECUR[row.recurrence].toLowerCase(),
+      h('div', { class: 'stack' }, h('p', { class: 'note', text: 'Уже створені записи лишаться як є. Нові «очікується» більше зʼявлятись не будуть.' }),
+        go, h('button', { class: 'btn ghost', type: 'button', text: 'Лишити', onclick: function () { close(); } })));
+  }
+
+  function renderSettingsPage() {
+    var st = S.settings;
+    var err = errBox();
+    var inputs = {};
+    function num(key, value) { var i = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off' }); i.value = value == null ? '' : String(value); inputs[key] = i; return i; }
+    var pct = st.tax_rate == null ? '' : String(Number((Number(st.tax_rate) * 100).toFixed(2)));
+    var form = h('div', { class: 'stack' }, err,
+      h('div', { class: 'form-grid' },
+        field('Поріг пізнього скасування, год', num('late', st.late_cancel_hours), 'Скасування пізніше за цей час: заняття згорає.'),
+        field('Ліміт переносів на місяць', num('limit', st.reschedule_limit), 'Порожньо: вимкнено.')),
+      h('div', { class: 'form-grid' },
+        field('Поріг «скоро оплата», занять', num('soon', st.soon_pay_threshold), 'Залишок цього числа й менше: учень у «скоро оплата».'),
+        field('Тривалість заняття за замовчуванням, хв', num('dur', st.default_duration_min))),
+      h('div', { class: 'form-grid' },
+        field('Горизонт розкладу, тижнів', num('weeks', st.schedule_horizon_weeks), 'На скільки тижнів наперед створюються заняття.'),
+        field('За скільки днів нагадувати про податки', num('remind', st.tax_remind_days))),
+      h('div', { class: 'form-grid' },
+        field('Ставка податку, %', num('rate', pct), '5% єдиний податок + 1% військовий збір = 6.'),
+        field('ЄСВ за квартал, грн', num('esv', st.esv_quarter == null ? '' : Number(st.esv_quarter)), 'Входить у податок-орієнтир у статистиці.')));
+    var save = actButton('primary', 'Зберегти налаштування', async function () {
+      err.hidden = true;
+      function int(key, min, max, name, optional) {
+        var v = inputs[key].value.trim();
+        if (!v && optional) return null;
+        if (!/^\d+$/.test(v) || Number(v) < min || Number(v) > max) { showErr(err, name + ': ціле число від ' + min + ' до ' + max + (optional ? ' або порожньо' : '') + '.'); inputs[key].focus(); return undefined; }
+        return Number(v);
+      }
+      var late = int('late', 0, 72, 'Поріг пізнього скасування'); if (late === undefined) return;
+      var limit = int('limit', 1, 31, 'Ліміт переносів', true); if (limit === undefined) return;
+      var soon = int('soon', 0, 10, 'Поріг «скоро оплата»'); if (soon === undefined) return;
+      var dur = int('dur', 10, 240, 'Тривалість заняття'); if (dur === undefined) return;
+      var weeks = int('weeks', 1, 8, 'Горизонт розкладу'); if (weeks === undefined) return;
+      var remind = int('remind', 0, 60, 'Нагадування про податки'); if (remind === undefined) return;
+      var rateStr = inputs.rate.value.trim().replace(',', '.');
+      if (!/^\d+(\.\d{1,2})?$/.test(rateStr) || Number(rateStr) > 50) { showErr(err, 'Ставка податку: відсоток від 0 до 50, наприклад 6.'); inputs.rate.focus(); return; }
+      var esvStr = inputs.esv.value.trim();
+      var esv = esvStr ? parseMoney(esvStr) : null;
+      if (esvStr && isNaN(esv)) { showErr(err, 'ЄСВ: сума в гривнях, наприклад 5000, або порожньо.'); inputs.esv.focus(); return; }
+      must(await sb.from('settings').update({ late_cancel_hours: late, reschedule_limit: limit, soon_pay_threshold: soon, default_duration_min: dur, schedule_horizon_weeks: weeks, tax_remind_days: remind, tax_rate: Number((Number(rateStr) / 100).toFixed(4)), esv_quarter: esv }).eq('id', 1));
+      await refresh({ silent: true });
+      toast('Налаштування збережено.');
+    });
+
+    // дати податків
+    var d = S.setData;
+    var dDate = h('input', { type: 'date', 'aria-label': 'Дата' });
+    var dKind = sel([['payment', 'Сплата податків'], ['declaration', 'Подача декларації']], 'payment'); dKind.setAttribute('aria-label', 'Тип');
+    var dNote = h('input', { type: 'text', maxlength: '120', placeholder: 'Примітка', 'aria-label': 'Примітка', autocomplete: 'off' });
+    var dErr = errBox();
+    var dAdd = actButton('ghost', 'Додати дату', async function () {
+      dErr.hidden = true;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dDate.value)) { showErr(dErr, 'Вкажи дату.'); dDate.focus(); return; }
+      must(await sb.from('tax_deadlines').insert({ due_date: dDate.value, kind: dKind.value, note: dNote.value.trim() || null }));
+      await refresh({ silent: true });
+    });
+    var today = todayStr();
+    var deadlines = d ? d.deadlines.slice().sort(function (a, b) { return a.due_date.localeCompare(b.due_date); }) : [];
+    var dList = !d ? h('p', { class: 'skeleton', text: 'Завантаження…' }) : deadlines.length
+      ? h('ul', { class: 'list' }, deadlines.map(function (x) {
+          var past = x.due_date < today;
+          return h('li', { class: 'item' },
+            h('div', { class: 'item-main' }, h('div', { class: past ? 'item-sub' : 'pay-title', text: (x.kind === 'declaration' ? 'Подати декларацію' : 'Сплатити податки') + ', ' + fmtDMY(x.due_date) }),
+              x.note || past ? h('div', { class: 'item-sub', text: [past ? 'минула' : null, x.note].filter(Boolean).join(', ') }) : null),
+            actButton('link', 'Видалити', async function () { must(await sb.from('tax_deadlines').delete().eq('id', x.id)); await refresh({ silent: true }); }));
+        }))
+      : h('p', { class: 'item-sub', text: 'Дат ще немає. З них береться нагадування «Сплатити податки» на Головній.' });
+
+    // регулярні витрати
+    var seriesRows = [];
+    if (d) {
+      var latest = {};
+      d.series.forEach(function (x) { if (!latest[x.series_id] || x.series_index > latest[x.series_id].series_index) latest[x.series_id] = x; });
+      seriesRows = Object.keys(latest).map(function (k) { return latest[k]; }).filter(function (x) { return x.recurrence === 'monthly' || x.recurrence === 'quarterly'; });
+    }
+    var sList = !d ? h('p', { class: 'skeleton', text: 'Завантаження…' }) : seriesRows.length
+      ? h('ul', { class: 'list' }, seriesRows.map(function (x) {
+          return h('li', { class: 'item' },
+            h('div', { class: 'item-main' }, h('div', { class: 'pay-title', text: x.description || CATEGORIES[x.category] }),
+              h('div', { class: 'item-sub', text: RECUR[x.recurrence] + ', ' + CATEGORIES[x.category] + ', ' + money(x.amount) })),
+            h('button', { class: 'btn link', type: 'button', text: 'Прибрати', onclick: function () { openStopSeries(x); } }));
+        }))
+      : h('p', { class: 'item-sub', text: 'Регулярних витрат ще немає. Додай витрату з повторенням у розділі «Витрати».' });
+
+    var last = st.last_backup_at ? fmtDMY(kyivDateStr(new Date(st.last_backup_at).getTime())) : null;
+    return h('main', { class: 'page narrow' },
+      S.error ? h('div', { class: 'msg err', role: 'alert', text: S.error }) : null,
+      h('div', { class: 'page-head' }, h('h1', { text: 'Налаштування' })),
+      h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Правила' })), form, h('div', { class: 'slot-actions space-top' }, save)),
+      h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Дати податків' })), dList,
+        h('div', { class: 'stack space-top' }, dErr, h('div', { class: 'form-grid' }, dDate, dKind), dNote, h('div', { class: 'slot-actions' }, dAdd))),
+      h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Регулярні витрати' })), sList,
+        S.recurringError ? h('div', { class: 'msg err', text: MIGRATION7 }) : null),
+      h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Резервна копія' })),
+        h('p', { class: 'item-sub', text: last ? 'Остання копія: ' + last + '.' : 'Копій ще не було.' }),
+        h('p', { class: 'hint', text: 'Файл містить дані учнів і оплат. Не клади його в публічні місця, зокрема в репозиторій на GitHub.' }),
+        h('div', { class: 'slot-actions space-top' }, actButton('ghost', 'Зберегти резервну копію', saveBackup))));
+  }
+
   // ================= Малювання =================
   var STATUS = {
     done: { label: 'Проведено', cls: 'ok', ic: 'check' },
@@ -1411,6 +1717,8 @@
       actions.append(h('button', { class: 'btn ghost small', type: 'button', text: 'Скасувати', onclick: function () { openCancelDialog(t.lesson).catch(fail); } }));
     } else if (t.type === 'hw-send') actions.append(actButton('ghost small', 'Надіслано', function () { return sendHw(t.lesson); }));
     else if (t.type === 'hw-check') actions.append(actButton('ghost small', 'Перевірено', function () { return checkHw(t.lesson); }));
+    else if (t.type === 'expense') actions.append(h('button', { class: 'btn primary small', type: 'button', text: 'Підтвердити', onclick: function () { openConfirmExpense(t.expense); } }));
+    else if (t.type === 'backup') actions.append(actButton('ghost small', 'Зберегти копію', saveBackup));
     else if (t.type === 'manual') {
       var cb = h('input', { type: 'checkbox', class: 'check', 'aria-label': 'Виконано: ' + t.text });
       cb.addEventListener('change', act(cb, function () { return finishTask(t.task); }));
@@ -1499,7 +1807,7 @@
     }, icon(dark ? 'sun' : 'moon')));
     if (withTools) tools.append(h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Вийти', onclick: signOut }, icon('out'), h('span', { text: 'Вийти' })));
     var cur = S.route.name === 'student' ? 'students' : S.route.name;
-    var nav = withTools ? h('nav', { class: 'nav', 'aria-label': 'Розділи' }, [['home', 'Головна', '#/'], ['schedule', 'Розклад', '#/schedule'], ['students', 'Учні', '#/students'], ['payments', 'Оплати', '#/payments']].map(function (n) {
+    var nav = withTools ? h('nav', { class: 'nav', 'aria-label': 'Розділи' }, [['home', 'Головна', '#/'], ['schedule', 'Розклад', '#/schedule'], ['students', 'Учні', '#/students'], ['payments', 'Оплати', '#/payments'], ['expenses', 'Витрати', '#/expenses'], ['settings', 'Налаштування', '#/settings']].map(function (n) {
       return h('a', { href: n[2], 'aria-current': cur === n[0] ? 'page' : null, text: n[1] });
     })) : null;
     return h('header', { class: 'topbar' }, h('div', { class: 'brand', text: 'Мій CRM' }), nav, tools);
@@ -1540,6 +1848,8 @@
       case 'student': view = renderStudentCard(); break;
       case 'payments': view = renderPaymentsPage(); break;
       case 'schedule': view = renderSchedulePage(); break;
+      case 'expenses': view = renderExpensesPage(); break;
+      case 'settings': view = renderSettingsPage(); break;
       default: view = renderHome();
     }
     app.replaceChildren(topbar(true), view);
