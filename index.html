@@ -839,10 +839,13 @@
     var kids = [].slice.call(arguments);
     return h('main', { class: 'page' }, S.error ? h('div', { class: 'msg err', role: 'alert', text: S.error }) : null, kids);
   }
-  function balanceBadge(b) {
+  // «Скоро оплата» має сенс лише для активних учнів; у тих, хто на паузі чи завершив, її немає
+  function balanceBadge(b, status) {
     if (!b || (b.lessons_bought === 0 && b.lessons_used === 0)) return h('span', { class: 'item-sub', text: 'Без оплат' });
     if (b.balance < 0) return h('span', { class: 'danger-text' }, icon('alert'), balanceText(b.balance));
-    var soon = b.balance <= S.settings.soon_pay_threshold;
+    var active = status === 'active';
+    if (!active && b.balance === 0) return h('span', { class: 'item-sub', text: 'Залишку немає' });
+    var soon = active && b.balance <= S.settings.soon_pay_threshold;
     return h('span', { class: 'bal' }, h('span', { text: balanceText(b.balance) }), soon ? h('span', { class: 'tag lost', text: 'скоро оплата' }) : null);
   }
 
@@ -959,7 +962,7 @@
         return h('li', {}, h('a', { class: 'person', href: '#/students/' + encodeURIComponent(s.id) },
           h('span', { class: 'person-main' }, h('span', { class: 'person-name', text: s.name }),
             h('span', { class: 'item-sub', text: [s.level, s.contact].filter(Boolean).join(', ') })),
-          balanceBadge(balanceOf(s.id))));
+          balanceBadge(balanceOf(s.id), s.status)));
       }) : [h('li', { class: 'item-sub empty-row', text: q ? 'За цим іменем нікого не знайдено.' : (f.status === 'active' ? 'Активних учнів ще немає. Натисни «Новий учень».' : 'Тут поки порожньо.') })]);
       segBox.replaceChildren.apply(segBox, Object.keys(STUDENT_STATUS).map(function (k) {
         var n = S.students.filter(function (s) { return s.status === k; }).length;
