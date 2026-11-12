@@ -259,6 +259,33 @@
   .delta.down { color: var(--danger); }
   .delta.none { color: var(--muted); font-weight: 400; }
   @media (max-width: 640px) { .cmp-row { grid-template-columns: 1fr 1fr; } .cmp-name { grid-column: 1 / -1; } }
+
+  /* ---------- рекап року ---------- */
+  .recap { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; padding: 16px 20px calc(20px + env(safe-area-inset-bottom)); background: var(--bg); color: var(--ink); }
+  .recap.tone-1 { background: var(--green-soft); }
+  .recap.tone-2 { background: var(--lilac-soft); }
+  .recap.tone-3 { background: var(--surface-2); }
+  .recap-top { display: flex; align-items: center; gap: 16px; max-width: 560px; width: 100%; margin: 0 auto; }
+  .recap-progress { flex: 1; display: flex; gap: 6px; }
+  .recap-seg { flex: 1; height: 18px; padding: 6px 0; border: 0; background: var(--line); background-clip: content-box; border-radius: 4px; }
+  .recap-seg.on { background-color: var(--green-deep); }
+  .recap-stage { flex: 1; display: flex; flex-direction: column; justify-content: center; width: 100%; max-width: 560px; margin: 0 auto; padding: 28px 0; }
+  .recap-lead { font-size: 1.3rem; margin: 0 0 6px; color: var(--ink); }
+  .recap-big { font-family: var(--serif); font-size: clamp(4.4rem, 20vw, 8.5rem); line-height: 1; font-weight: 600; color: var(--green-deep); overflow-wrap: anywhere; font-variant-numeric: lining-nums; }
+  .recap-big.text { font-size: clamp(3rem, 14vw, 5.6rem); line-height: 1.05; }
+  .recap-unit { font-family: var(--serif); font-size: 2rem; font-weight: 600; margin: 8px 0 0; }
+  .recap-line { font-size: 1.12rem; margin: 10px 0 0; color: var(--ink); }
+  .recap-figs { display: grid; grid-template-columns: 1fr 1fr; gap: 22px 18px; margin: 10px 0 18px; }
+  .recap-fig-val { font-family: var(--serif); font-size: clamp(2rem, 9vw, 3rem); font-weight: 600; line-height: 1.1; color: var(--green-deep); font-variant-numeric: lining-nums; }
+  .recap-fig-lbl { color: var(--muted); }
+  .recap-fig-delta { font-size: .92rem; font-weight: 600; margin-top: 2px; }
+  .recap-controls { display: flex; justify-content: space-between; gap: 12px; max-width: 560px; width: 100%; margin: 0 auto; }
+  .recap-controls .btn { flex: 1; }
+  @media (prefers-reduced-motion: no-preference) {
+    .recap { transition: background-color .4s ease; }
+    .recap-stage.enter { animation: recapIn .35s ease both; }
+    @keyframes recapIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  }
   .day { margin-bottom: 30px; }
   .day-title { font-size: 1.45rem; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
   .day.today .day-title { color: var(--green-deep); }
@@ -447,6 +474,9 @@
     if (sp && sp.total > 0 && sp.written < sp.total) {
       out.push({ key: 'summaries', type: 'summaries', month: sp.month, text: 'Допиши підсумки учнів', sub: monthName(sp.month) + ': написано ' + sp.written + ' з ' + sp.total });
     }
+    // 6а. Рекап року: у грудні й до 14 січня, поки не переглянуто
+    var recapYear = recapOfferYear(today);
+    if (recapYear && !recapSeen(recapYear)) out.push({ key: 'recap', type: 'recap', year: recapYear, text: 'Подивись рекап ' + recapYear + ' року', sub: 'Твій рік у цифрах' });
     // 6б. Резервна копія раз на тиждень
     var lastBackup = s.settings.last_backup_at ? new Date(s.settings.last_backup_at).getTime() : 0;
     if (!lastBackup || Date.now() - lastBackup >= 7 * 86400000) {
@@ -485,7 +515,7 @@
   }
 
   // для перевірок у тестах
-  window.CRM_LOGIC = { kyivWallToUtc: kyivWallToUtc, kyivDateStr: kyivDateStr, dayRange: dayRange, daysToBirthday: daysToBirthday, balanceText: balanceText, plural: plural, kyivWallString: kyivWallString, parseWallString: parseWallString, buildTasks: buildTasks, buildPayments: buildPayments, fmtTime: fmtTime, statsModel: statsModel, aggMonths: aggMonths, compact: compact, pctChange: pctChange, summaryTarget: summaryTarget };
+  window.CRM_LOGIC = { kyivWallToUtc: kyivWallToUtc, kyivDateStr: kyivDateStr, dayRange: dayRange, daysToBirthday: daysToBirthday, balanceText: balanceText, plural: plural, kyivWallString: kyivWallString, parseWallString: parseWallString, buildTasks: buildTasks, buildPayments: buildPayments, fmtTime: fmtTime, statsModel: statsModel, aggMonths: aggMonths, compact: compact, pctChange: pctChange, summaryTarget: summaryTarget, recapModel: recapModel, maskName: maskName, recapOfferYear: recapOfferYear };
 
   // ================= DOM-помічники (весь текст — лише textContent) =================
   function h(tag, props) {
@@ -520,7 +550,7 @@
 
   // ================= Стан і доступ до даних =================
   var sb = null;
-  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7), schedWeek: mondayOf(kyivDateStr(Date.now())), weekData: null, genAt: 0, scheduleError: false, expMonth: kyivDateStr(Date.now()).slice(0, 7), expData: null, setData: null, genExpAt: 0, recurringError: false, statData: null, sumData: null, sumMonth: (summaryTarget(kyivDateStr(Date.now())) || kyivDateStr(Date.now()).slice(0, 7)), statType: 'month', statCursor: kyivDateStr(Date.now()).slice(0, 7) };
+  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7), schedWeek: mondayOf(kyivDateStr(Date.now())), weekData: null, genAt: 0, scheduleError: false, expMonth: kyivDateStr(Date.now()).slice(0, 7), expData: null, setData: null, genExpAt: 0, recurringError: false, statData: null, recapData: null, recapIdx: 0, recapYear: (function () { var t = kyivDateStr(Date.now()); return recapOfferYear(t) || Number(t.slice(0, 4)); })(), sumData: null, sumMonth: (summaryTarget(kyivDateStr(Date.now())) || kyivDateStr(Date.now()).slice(0, 7)), statType: 'month', statCursor: kyivDateStr(Date.now()).slice(0, 7) };
   var app = document.getElementById('app');
 
   function must(res) { if (res.error) throw res.error; return res.data; }
@@ -774,6 +804,7 @@
     if (parts[0] === 'settings') return { name: 'settings' };
     if (parts[0] === 'stats') return { name: 'stats' };
     if (parts[0] === 'summaries') return { name: 'summaries' };
+    if (parts[0] === 'recap') return { name: 'recap' };
     return { name: 'home' };
   }
   var WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'нд'];
@@ -882,6 +913,18 @@
       var list = Object.keys(per).map(function (k) { var x = per[k]; x.name = (S.studentMap[k] || {}).name || 'Учень'; return x; })
         .sort(function (a, b) { return Number(a.written) - Number(b.written) || a.name.localeCompare(b.name, 'uk'); });
       S.sumData = { month: sm, rows: list };
+    } else if (route.name === 'recap') {
+      var ry = S.recapYear, lo = kyivWallToUtc(ry - 1, 1, 1, 0, 0), hi = kyivWallToUtc(ry + 1, 1, 1, 0, 0), rl = [], from = 0;
+      for (;;) {
+        var pg = must(await sb.from('lessons').select('student_id,starts_at,duration_min,status,kind,homework_sent,homework_checked')
+          .eq('kind', 'lesson').eq('status', 'done').gte('starts_at', isoOf(lo)).lt('starts_at', isoOf(hi)).order('starts_at', { ascending: true }).range(from, from + 999)) || [];
+        rl = rl.concat(pg);
+        if (pg.length < 1000) break;
+        from += 1000;
+      }
+      var rm = must(await sb.from('stats_month').select('*').order('month', { ascending: true })) || [];
+      if (S.route !== route || S.recapYear !== ry) return;
+      S.recapData = { year: ry, model: recapModel({ year: ry, lessons: rl, months: rm, students: S.students, todayStr: todayStr(), cfg: S.settings }) };
     } else if (route.name === 'stats') {
       var months = must(await sb.from('stats_month').select('*').order('month', { ascending: true })) || [];
       if (S.route !== route) return;
@@ -896,7 +939,7 @@
     });
   }
   function onRouteChange() {
-    S.route = parseRoute(); S.card = null; S.payData = null; S.weekData = null; S.expData = null; S.setData = null; S.statData = null; S.sumData = null; S.error = null;
+    S.route = parseRoute(); S.card = null; S.payData = null; S.weekData = null; S.expData = null; S.setData = null; S.statData = null; S.sumData = null; S.recapData = null; S.error = null;
     try { window.scrollTo(0, 0); } catch (e) {}
     render();
     if (S.session && S.settings) loadRouteSafely();
@@ -1886,7 +1929,8 @@
       h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Попередній період', text: '‹', disabled: !m.canPrev, onclick: function () { move(-1); } }),
       h('span', { class: 'month-label', text: m.label }),
       h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Наступний період', text: '›', disabled: !m.canNext, onclick: function () { move(1); } }),
-      !m.isCurrent ? h('button', { class: 'btn ghost small', type: 'button', text: 'Сьогодні', onclick: function () { S.statCursor = nowYm; render(); } }) : null);
+      !m.isCurrent ? h('button', { class: 'btn ghost small', type: 'button', text: 'Сьогодні', onclick: function () { S.statCursor = nowYm; render(); } }) : null,
+      S.statType === 'year' ? h('button', { class: 'btn primary small', type: 'button', text: 'Рекап року', onclick: function () { openRecap(Number(m.cursor.slice(0, 4))); } }) : null);
     var c = m.cur, ongoingNote = m.isCurrent ? h('p', { class: 'item-sub', text: 'Цей період ще триває, тому цифри неповні.' }) : null;
     var noEsv = !(Number(S.settings.esv_quarter) > 0)
       ? h('div', { class: 'msg warn', role: 'status' }, 'ЄСВ за квартал не внесено в ', h('a', { href: '#/settings', text: 'Налаштування' }), ': податок-орієнтир занижений, а прибуток завищений.') : null;
@@ -2045,6 +2089,178 @@
       })) : h('p', { class: 'item-sub', text: 'Проведених занять ще немає.' }));
   }
 
+  // ================= Крок 8: Рекап року =================
+  var WEEKDAY_NAMES = ['неділя', 'понеділок', 'вівторок', 'середа', 'четвер', 'пʼятниця', 'субота'];
+
+  // Імʼя в рекапі: перша літера, решта — зірочки (пробіли лишаються), щоб рекап не розкривав учнів
+  function maskName(name) {
+    return Array.from(String(name || '').trim()).map(function (c, i) { return i === 0 || /\s/.test(c) ? c : '*'; }).join('');
+  }
+  function recapOfferYear(dateStr) {
+    var a = dateStr.split('-').map(Number);
+    if (a[1] === 12) return a[0];
+    if (a[1] === 1 && a[2] <= 14) return a[0] - 1;
+    return null;
+  }
+  function recapSeen(year) { try { return localStorage.getItem('crm-recap-seen-' + year) === '1'; } catch (e) { return false; } }
+  function markRecapSeen(year) { try { localStorage.setItem('crm-recap-seen-' + year, '1'); } catch (e) {} }
+  function openRecap(year) {
+    S.recapYear = year; S.recapIdx = 0; S.recapData = null; markRecapSeen(year);
+    if (location.hash === '#/recap') onRouteChange(); else location.hash = '#/recap';
+  }
+  function tallyKey(arr, keyFn) { var m = {}; arr.forEach(function (x) { var k = keyFn(x); m[k] = (m[k] || 0) + 1; }); return m; }
+  function topKey(map, less) { // ключ із найбільшим значенням, при рівності — «менший» за правилом less
+    var best = null;
+    Object.keys(map).forEach(function (k) { if (best === null || map[k] > map[best] || (map[k] === map[best] && less(k, best))) best = k; });
+    return best;
+  }
+
+  // Усі картки рекапу рахуються тут (окремо від екрана, щоб це можна було перевірити)
+  function recapModel(a) {
+    var year = String(a.year), today = a.todayStr, nowYm = today.slice(0, 7);
+    var sm = statsModel(a.months, 'year', year + '-06', nowYm, a.cfg);
+    if (sm.empty || sm.cursor.slice(0, 4) !== year) return { empty: true, year: year };
+    var done = a.lessons.filter(function (l) { return l.kind === 'lesson' && l.status === 'done'; }).map(function (l) {
+      var ms = new Date(l.starts_at).getTime(), p = kyivParts(ms);
+      return { l: l, y: p.year, ym: p.year + '-' + pad(p.month), day: p.year + '-' + pad(p.month) + '-' + pad(p.day), hh: p.hour, dow: new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay() };
+    }).filter(function (x) { return String(x.y) === year; });
+    var c = sm.cur;
+    if (!done.length && !(c.income > 0) && !(c.lessons_done > 0)) return { empty: true, year: year };
+    var partial = year === today.slice(0, 4);
+    var cards = [];
+    var cnt = function (n) { return n + ' ' + lessonsWord(n); };
+
+    cards.push({ key: 'intro', lead: 'Твій рік у цифрах', big: year, lines: [partial ? 'Станом на ' + dmFmt.format(utcDate(today)) : 'Підсумок року'] });
+
+    cards.push({ key: 'lessons', lead: 'Цього року ти провела', big: String(c.lessons_done), count: { value: c.lessons_done, fmt: 'int' }, unit: lessonsWord(c.lessons_done), lines: ['Це ' + fmtHours(c.hours) + ' з учнями'] });
+
+    var incLines = [];
+    if (sm.months.length > 1 && sm.best && sm.best.income > 0) incLines.push('Найкращий місяць: ' + monthName(sm.best.ym) + ', ' + money(sm.best.income));
+    cards.push({ key: 'income', lead: 'Отримано за рік', big: money(c.income), count: { value: c.income, fmt: 'money' }, lines: incLines });
+
+    // учні
+    var perStudent = tallyKey(done, function (x) { return x.l.student_id; });
+    var ids = Object.keys(perStudent), n = ids.length;
+    var started = (a.students || []).filter(function (s) { return s.start_date && s.start_date.slice(0, 4) === year; }).length;
+    var anyStart = (a.students || []).some(function (s) { return s.start_date; });
+    if (n > 0) {
+      var sLines = [];
+      if (anyStart) sLines.push('Цього року до тебе прийшло ' + started + ' ' + plural(started, 'новий учень', 'нових учні', 'нових учнів'));
+      cards.push({ key: 'students', lead: 'Ти навчала', big: String(n), count: { value: n, fmt: 'int' }, unit: (n % 10 === 1 && n % 100 !== 11) ? 'учня' : 'учнів', lines: sLines });
+    }
+    if (n >= 2) {
+      var nameOf = {}; (a.students || []).forEach(function (s) { nameOf[s.id] = s.name; });
+      var topId = topKey(perStudent, function (x, y) { return String(nameOf[x] || x).localeCompare(String(nameOf[y] || y), 'uk') < 0; });
+      cards.push({ key: 'top', lead: 'Найбільше занять ти провела з', big: maskName(nameOf[topId] || 'Учень'), textBig: true, unit: cnt(perStudent[topId]) });
+    }
+    if (done.length) {
+      var byMonth = tallyKey(done, function (x) { return x.ym; }), byDay = tallyKey(done, function (x) { return x.day; });
+      var bm = topKey(byMonth, function (x, y) { return x < y; }), bd = topKey(byDay, function (x, y) { return x < y; });
+      cards.push({ key: 'busiest', lead: 'Найзавантаженіший місяць', big: monthName(bm), textBig: true, unit: cnt(byMonth[bm]), lines: ['Рекордний день: ' + dmFmt.format(utcDate(bd)) + ', ' + cnt(byDay[bd])] });
+      var byDow = tallyKey(done, function (x) { return x.dow === 0 ? 7 : x.dow; }), byHour = tallyKey(done, function (x) { return x.hh; });
+      var wd = topKey(byDow, function (x, y) { return Number(x) < Number(y); }), hr = topKey(byHour, function (x, y) { return Number(x) < Number(y); });
+      cards.push({ key: 'rhythm', lead: 'Улюблений день тижня', big: WEEKDAY_NAMES[Number(wd) % 7], textBig: true, unit: cnt(byDow[wd]), lines: ['Найпопулярніший час: ' + pad(Number(hr)) + ':00'] });
+    }
+    var sent = done.filter(function (x) { return x.l.homework_sent; }).length, checked = done.filter(function (x) { return x.l.homework_checked; }).length;
+    if (sent > 0) cards.push({ key: 'homework', lead: 'Домашні завдання', big: String(sent), count: { value: sent, fmt: 'int' }, unit: 'надіслано', lines: ['Перевірено: ' + checked] });
+
+    var pLines = ['Реальна ставка: ' + fmtRate(c.hourly_rate), 'Після витрат і податку-орієнтиру'];
+    if (!(Number(a.cfg && a.cfg.esv_quarter) > 0)) pLines.push('ЄСВ не внесено в Налаштування, тому прибуток завищений');
+    cards.push({ key: 'profit', lead: 'Чистий прибуток', big: money(c.net_profit), count: { value: c.net_profit, fmt: 'money' }, lines: pLines });
+
+    var prev = sm.prev, prevYear = String(Number(year) - 1);
+    var fig = function (label, value, key) { return { label: label, value: value, delta: prev ? pctChange(c[key], prev[key]) : null }; };
+    cards.push({ key: 'final', lead: 'Твій ' + year + ' у підсумку', figures: [fig('Занять', String(c.lessons_done), 'lessons_done'), { label: 'Годин', value: fmtHours(c.hours).replace(' год', '') }, fig('Дохід', money(c.income), 'income'), fig('Чистий прибуток', money(c.net_profit), 'net_profit')], prevYear: prev ? prevYear : null, partial: partial });
+    return { empty: false, year: year, partial: partial, cards: cards };
+  }
+
+  function animateCount(el, value, fmt) {
+    var reduce = !window.matchMedia || window.matchMedia('(prefers-reduced-motion: reduce)').matches || !window.requestAnimationFrame;
+    var finalText = el.textContent;
+    el.setAttribute('aria-label', finalText);
+    if (reduce || !isFinite(value) || Math.abs(value) < 5) return;
+    var t0 = null, dur = 900;
+    function frame(ts) {
+      if (!el.isConnected) return;
+      if (t0 === null) t0 = ts;
+      var k = Math.min(1, (ts - t0) / dur), e = 1 - Math.pow(1 - k, 3), v = value * e;
+      el.textContent = k >= 1 ? finalText : (fmt === 'money' ? money(v) : String(Math.round(v)));
+      if (k < 1) window.requestAnimationFrame(frame);
+    }
+    el.textContent = fmt === 'money' ? money(0) : '0';
+    window.requestAnimationFrame(frame);
+  }
+
+  var recapKeyHandler = null;
+  function setRecapKeys(fn) {
+    if (recapKeyHandler) document.removeEventListener('keydown', recapKeyHandler);
+    recapKeyHandler = fn;
+    if (fn) document.addEventListener('keydown', fn);
+  }
+  function closeRecap() { location.hash = '#/stats'; }
+
+  function renderRecap() {
+    var d = S.recapData;
+    var shell = function (kids, tone) { return h('div', { class: 'recap tone-' + tone }, kids); };
+    var closeBtn = h('button', { class: 'btn ghost small', type: 'button', text: 'Закрити', onclick: closeRecap });
+    setRecapKeys(function (e) { if (e.key === 'Escape') closeRecap(); });
+    if (!d || d.year !== S.recapYear) return shell([h('div', { class: 'recap-top' }, h('span'), closeBtn), h('div', { class: 'recap-stage' }, h('p', { class: 'recap-lead', text: 'Готую твій рік…' }))], 0);
+    var m = d.model;
+    if (m.empty) return shell([h('div', { class: 'recap-top' }, h('span'), closeBtn), h('div', { class: 'recap-stage' }, h('p', { class: 'recap-lead', text: 'У ' + S.recapYear + ' році ще немає даних для рекапу.' }), h('p', { class: 'item-sub', text: 'Коли зʼявляться проведені заняття й оплати, тут буде твій рік у цифрах.' }))], 0);
+
+    var cards = m.cards, total = cards.length;
+    var root = shell([], 0), progress = h('div', { class: 'recap-progress', role: 'group', 'aria-label': 'Слайди' });
+    var stage = h('div', { class: 'recap-stage', role: 'group' });
+    var back = h('button', { class: 'btn ghost', type: 'button', text: 'Назад' }), next = h('button', { class: 'btn primary', type: 'button', text: 'Далі' });
+    root.append(h('div', { class: 'recap-top' }, progress, closeBtn), stage, h('div', { class: 'recap-controls' }, back, next));
+
+    function cardEl(c, i) {
+      var kids = [h('p', { class: 'recap-lead', text: c.lead })];
+      if (c.figures) {
+        kids.push(h('div', { class: 'recap-figs' }, c.figures.map(function (f) {
+          var dl = f.delta == null ? null : (f.delta === 0 ? 'без змін' : (f.delta > 0 ? '▲ +' : '▼ −') + Math.abs(f.delta) + '%');
+          return h('div', { class: 'recap-fig' }, h('div', { class: 'recap-fig-val', text: f.value }), h('div', { class: 'recap-fig-lbl', text: f.label }), dl ? h('div', { class: 'recap-fig-delta', text: dl + ' до ' + c.prevYear }) : null);
+        })));
+        kids.push(h('p', { class: 'recap-line', text: c.partial ? 'Рік ще триває: цифри оновляться.' : 'Це був твій рік у цифрах.' }));
+      } else {
+        var big = h('div', { class: 'recap-big' + (c.textBig ? ' text' : ''), text: c.big, 'data-final': c.big });
+        kids.push(big);
+        if (c.unit) kids.push(h('p', { class: 'recap-unit', text: c.unit }));
+        (c.lines || []).forEach(function (t) { kids.push(h('p', { class: 'recap-line', text: t })); });
+        if (c.count) window.setTimeout(function () { animateCount(big, c.count.value, c.count.fmt); }, 0);
+      }
+      return kids;
+    }
+    function show(i, animate) {
+      i = Math.max(0, Math.min(total - 1, i)); S.recapIdx = i;
+      root.className = 'recap tone-' + (i % 4);
+      progress.replaceChildren.apply(progress, cards.map(function (c, k) {
+        return h('button', { class: 'recap-seg' + (k <= i ? ' on' : ''), type: 'button', 'aria-label': 'Слайд ' + (k + 1) + ' з ' + total, 'aria-current': k === i ? 'step' : null, onclick: function () { show(k, true); } });
+      }));
+      stage.className = 'recap-stage' + (animate ? ' enter' : '');
+      stage.setAttribute('aria-label', 'Слайд ' + (i + 1) + ' з ' + total);
+      stage.replaceChildren.apply(stage, cardEl(cards[i], i));
+      back.disabled = i === 0;
+      next.textContent = i === total - 1 ? 'Спочатку' : 'Далі';
+    }
+    back.addEventListener('click', function () { show(S.recapIdx - 1, true); });
+    next.addEventListener('click', function () { show(S.recapIdx === total - 1 ? 0 : S.recapIdx + 1, true); });
+    setRecapKeys(function (e) {
+      if (e.key === 'Escape') closeRecap();
+      else if (e.key === 'ArrowRight' || e.key === ' ' && e.target === document.body) show(S.recapIdx + 1, true);
+      else if (e.key === 'ArrowLeft') show(S.recapIdx - 1, true);
+    });
+    var x0 = null;
+    root.addEventListener('touchstart', function (e) { x0 = e.changedTouches[0].clientX; }, { passive: true });
+    root.addEventListener('touchend', function (e) {
+      if (x0 == null) return;
+      var dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 50) show(S.recapIdx + (dx < 0 ? 1 : -1), true);
+    }, { passive: true });
+    show(Math.min(S.recapIdx || 0, total - 1), false);
+    return root;
+  }
+
   // ================= Малювання =================
   var STATUS = {
     done: { label: 'Проведено', cls: 'ok', ic: 'check' },
@@ -2112,6 +2328,7 @@
     else if (t.type === 'hw-check') actions.append(actButton('ghost small', 'Перевірено', function () { return checkHw(t.lesson); }));
     else if (t.type === 'expense') actions.append(h('button', { class: 'btn primary small', type: 'button', text: 'Підтвердити', onclick: function () { openConfirmExpense(t.expense); } }));
     else if (t.type === 'backup') actions.append(actButton('ghost small', 'Зберегти копію', saveBackup));
+    else if (t.type === 'recap') actions.append(h('button', { class: 'btn primary small', type: 'button', text: 'Подивитись', onclick: function () { openRecap(t.year); } }));
     else if (t.type === 'summaries') actions.append(h('button', { class: 'btn primary small', type: 'button', text: 'Відкрити', onclick: function () { openSummaries(t.month); } }));
     else if (t.type === 'manual') {
       var cb = h('input', { type: 'checkbox', class: 'check', 'aria-label': 'Виконано: ' + t.text });
@@ -2227,6 +2444,7 @@
 
   function render() {
     if (!S.ready) return;
+    if (S.route.name !== 'recap') setRecapKeys(null);
     if (!S.session) { renderLogin(); return; }
     if (S.noAccess) {
       app.replaceChildren(topbar(true), h('main', { class: 'center' }, h('h1', { text: 'Немає доступу' }), h('p', { text: 'Цей акаунт не має права читати дані CRM. Вийди й увійди з email, який вказано у функції is_owner() в базі.' })));
@@ -2246,6 +2464,7 @@
       case 'settings': view = renderSettingsPage(); break;
       case 'stats': view = renderStatsPage(); break;
       case 'summaries': view = renderSummariesPage(); break;
+      case 'recap': app.replaceChildren(renderRecap()); return;
       default: view = renderHome();
     }
     app.replaceChildren(topbar(true), view);
