@@ -112,6 +112,7 @@
   .slot.next .slot-dot { background: var(--green); box-shadow: 0 0 0 5px var(--green-soft); }
   .slot.done .slot-dot { background: var(--green); opacity: .45; }
   .slot.void .slot-dot { border-color: var(--muted); }
+  .slot.lost .slot-dot { border-color: var(--warn); background: var(--warn-soft); }
   .slot.void .slot-time { text-decoration: line-through; color: var(--muted); }
   .slot-body { padding: 8px 14px 10px 6px; border-radius: 14px; min-width: 0; }
   .slot.next .slot-body { background: var(--green-soft); }
@@ -156,13 +157,13 @@
   .debt-box { background: var(--danger-soft); border-radius: 14px; padding: 10px 16px; margin-bottom: 14px; }
   .debt-box .item { border-top-color: transparent; padding: 8px 0; }
   .sub-title { font-weight: 600; margin: 0 0 6px; color: var(--muted); font-size: .95rem; }
-  .add-task { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
-  .add-task input[type="text"] { flex: 1 1 200px; }
+  .add-task { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 14px; }
+  .add-task input[type="text"] { grid-column: 1 / -1; }
   input[type="text"], input[type="email"], input[type="datetime-local"], input[type="date"], textarea {
     min-height: 44px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); width: 100%;
   }
   textarea { min-height: 110px; resize: vertical; }
-  .add-task input[type="date"] { flex: 0 0 160px; width: 160px; }
+  .add-task input[type="date"] { width: 100%; min-width: 0; }
   .check { width: 22px; height: 22px; accent-color: var(--green); margin-top: 2px; flex: none; }
 
   /* ---------- підсумок місяця ---------- */
@@ -648,7 +649,7 @@
     var consult = l.kind === 'consultation';
     var name = consult ? l.guest_name : ((S.studentMap[l.student_id] || {}).name || 'Учень');
     var st = STATUS[l.status];
-    var voided = l.status === 'cancelled' || l.status === 'rescheduled' || l.status === 'lost';
+    var voided = l.status === 'cancelled' || l.status === 'rescheduled';
     var meta = h('div', { class: 'slot-meta' },
       consult ? h('span', { class: 'tag consult', text: 'Консультація' }) : null,
       h('span', { text: (l.duration_min || 50) + ' хв' }),
@@ -662,7 +663,7 @@
       actions.append(h('button', { class: 'btn link', type: 'button', text: l.notes ? 'Змінити нотатку' : 'Додати нотатку', onclick: function () { openNoteDialog(l); } }));
       actions.append(actButton('link', 'Повернути в заплановані', function () { return undoDone(l); }));
     }
-    return h('li', { class: 'slot' + (isNext ? ' next' : '') + (l.status === 'done' ? ' done' : '') + (voided ? ' void' : '') },
+    return h('li', { class: 'slot' + (isNext ? ' next' : '') + (l.status === 'done' ? ' done' : '') + (l.status === 'lost' ? ' lost' : '') + (voided ? ' void' : '') },
       h('div', { class: 'slot-time', text: fmtTime(startMs) }),
       h('div', { class: 'slot-dot', 'aria-hidden': 'true' }),
       h('div', { class: 'slot-body' }, h('div', { class: 'slot-title', text: name }), meta, actions.children.length ? actions : null));
