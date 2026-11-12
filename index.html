@@ -220,6 +220,12 @@
   .modal.wide { max-width: 600px; }
   .field { margin-bottom: 0; }
 
+  .day { margin-bottom: 30px; }
+  .day-title { font-size: 1.45rem; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+  .day.today .day-title { color: var(--green-deep); }
+  .day > .item-sub { margin: 4px 0 0; }
+  .month-nav .btn { margin-left: 12px; }
+
   /* ---------- підсумок місяця ---------- */
   .summary { margin-top: 56px; padding: 16px 20px; background: var(--surface-2); border-radius: 16px; display: flex; flex-wrap: wrap; gap: 6px 28px; align-items: baseline; }
   .summary .big { font-family: var(--serif); font-size: 1.8rem; font-weight: 600; font-variant-numeric: lining-nums; }
@@ -468,7 +474,7 @@
 
   // ================= Стан і доступ до даних =================
   var sb = null;
-  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7) };
+  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7), schedWeek: mondayOf(kyivDateStr(Date.now())), weekData: null, genAt: 0, scheduleError: false };
   var app = document.getElementById('app');
 
   function must(res) { if (res.error) throw res.error; return res.data; }
@@ -518,7 +524,7 @@
     if (!sb || !S.session) return;
     S.loading = true; S.error = null;
     if (!opts || !opts.silent) render();
-    try { await loadAll(); if (!S.noAccess) await loadRouteData(); }
+    try { await generateSchedule(null, false); await loadAll(); if (!S.noAccess) await loadRouteData(); }
     catch (e) { console.error(e); S.error = 'Не вдалося завантажити дані. Перевір інтернет і натисни «Оновити».'; }
     S.loading = false;
     render();
@@ -623,7 +629,12 @@
       must(await sb.from('lessons').update({ starts_at: new Date(ts).toISOString() }).eq('id', l.id));
     } else {
       var row = { kind: 'lesson', student_id: l.student_id, package_id: l.package_id || null, starts_at: new Date(ts).toISOString(), duration_min: l.duration_min, status: 'planned' };
-      var ins = must(await sb.from('lessons').insert(row).select().single());
+      var insRes = await sb.from('lessons').insert(row).select().single();
+      if (insRes.error) {
+        if (insRes.error.code === '23505') { toast('У цього учня вже є заняття на цей час. Обери інший час.', { error: true }); return; }
+        throw insRes.error;
+      }
+      var ins = insRes.data;
       must(await sb.from('lessons').update({ status: 'rescheduled', rescheduled_to: ins.id }).eq('id', l.id));
     }
     closeFn(); await refresh({ silent: true });
@@ -695,6 +706,7 @@
     var parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
     if (parts[0] === 'students') return parts[1] ? { name: 'student', id: decodeURIComponent(parts[1]) } : { name: 'students' };
     if (parts[0] === 'payments') return { name: 'payments' };
+    if (parts[0] === 'schedule') return { name: 'schedule' };
     return { name: 'home' };
   }
   var WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'нд'];
@@ -764,6 +776,15 @@
       var pkgMap = {};
       pkgs.forEach(function (x) { pkgMap[x.id] = x; });
       S.payData = { month: month, rows: rows, pkgMap: pkgMap };
+    } else if (route.name === 'schedule') {
+      var wk = S.schedWeek, a = wk.split('-').map(Number);
+      var e = addDaysStr(wk, 7).split('-').map(Number);
+      var wkRows = must(await sb.from('lessons').select('*')
+        .gte('starts_at', new Date(kyivWallToUtc(a[0], a[1], a[2], 0, 0)).toISOString())
+        .lt('starts_at', new Date(kyivWallToUtc(e[0], e[1], e[2], 0, 0)).toISOString())
+        .order('starts_at', { ascending: true })) || [];
+      if (S.route !== route || S.schedWeek !== wk) return;
+      S.weekData = { week: wk, lessons: wkRows };
     }
   }
   function loadRouteSafely() {
@@ -772,7 +793,7 @@
     });
   }
   function onRouteChange() {
-    S.route = parseRoute(); S.card = null; S.payData = null; S.error = null;
+    S.route = parseRoute(); S.card = null; S.payData = null; S.weekData = null; S.error = null;
     try { window.scrollTo(0, 0); } catch (e) {}
     render();
     if (S.session && S.settings) loadRouteSafely();
@@ -865,12 +886,26 @@
       if (isNew) {
         var created = must(await sb.from('students').insert(row).select().single());
         close();
+        var made = row.schedule.length ? await generateSchedule(created.id, true) : 0;
         await refresh({ silent: true });
         location.hash = '#/students/' + encodeURIComponent(created.id);
         openFirstPaymentPrompt(created);
+        if (made === null) toast('Учня збережено. ' + SCHEDULE_FIX, { error: true });
+        else if (made > 0) toast(createdText(made));
       } else {
+        var schedChanged = normSchedule(st.schedule) !== normSchedule(row.schedule);
         must(await sb.from('students').update(row).eq('id', st.id));
-        close(); await refresh({ silent: true }); toast('Зміни збережено.');
+        var hadFuture = schedChanged ? await hasFutureGenerated(st.id) : false;
+        close();
+        if (hadFuture) {
+          await refresh({ silent: true });
+          openScheduleChangeDialog(st.id, row.schedule.length > 0);
+          return;
+        }
+        var made2 = row.status === 'active' && row.schedule.length ? await generateSchedule(st.id, true) : 0;
+        await refresh({ silent: true });
+        if (made2 === null) toast('Зміни збережено. ' + SCHEDULE_FIX, { error: true });
+        else toast('Зміни збережено.' + (made2 > 0 ? ' ' + createdText(made2) : ''));
       }
     });
     var content = h('div', { class: 'stack' }, err,
@@ -1113,6 +1148,204 @@
       nav, body);
   }
 
+  // ================= Крок 4: розклад =================
+  function mondayOf(dateStr) {
+    var a = dateStr.split('-').map(Number);
+    var dow = new Date(Date.UTC(a[0], a[1] - 1, a[2])).getUTCDay(); // 0 = неділя
+    return addDaysStr(dateStr, -((dow + 6) % 7));
+  }
+  var dayFmt = new Intl.DateTimeFormat('uk-UA', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
+  var dmFmt = new Intl.DateTimeFormat('uk-UA', { timeZone: 'UTC', day: 'numeric', month: 'long' });
+  function utcDate(dateStr) { var a = dateStr.split('-').map(Number); return new Date(Date.UTC(a[0], a[1] - 1, a[2])); }
+  function dayLabel(dateStr) { var s = dayFmt.format(utcDate(dateStr)); return s.charAt(0).toUpperCase() + s.slice(1); }
+  function weekLabel(wk) {
+    var end = addDaysStr(wk, 6);
+    return wk.slice(5, 7) === end.slice(5, 7) ? Number(wk.slice(8)) + '–' + dmFmt.format(utcDate(end)) : dmFmt.format(utcDate(wk)) + ' – ' + dmFmt.format(utcDate(end));
+  }
+  function isoOf(ms) { return new Date(ms).toISOString(); }
+
+  // Створення занять за постійним розкладом (функція в базі, безпечна до повторних викликів)
+  async function generateSchedule(studentId, force) {
+    if (!force && Date.now() - S.genAt < 60000) return 0;
+    S.genAt = Date.now();
+    var res = await sb.rpc('generate_schedule_lessons', studentId ? { p_student_id: studentId } : {});
+    if (res.error) { console.warn(res.error); S.scheduleError = true; return null; }
+    S.scheduleError = false;
+    return res.data || 0;
+  }
+  function createdText(n) {
+    var w = S.settings ? S.settings.schedule_horizon_weeks : 2;
+    return 'Створено ' + n + ' ' + lessonsWord(n) + ' за розкладом на ' + w + ' ' + plural(w, 'тиждень', 'тижні', 'тижнів') + ' наперед.';
+  }
+  var SCHEDULE_FIX = 'Заняття за розкладом не створено: запусти файл 06_schedule.sql у Supabase.';
+
+  async function hasFutureGenerated(studentId) {
+    var res = await sb.from('lessons').select('id').eq('student_id', studentId).eq('from_schedule', true).eq('status', 'planned').gte('starts_at', isoOf(Date.now())).limit(1);
+    return !res.error && !!(res.data && res.data.length);
+  }
+  function normSchedule(arr) {
+    return JSON.stringify((arr || []).map(function (x) { return { weekday: Number(x.weekday), time: x.time }; })
+      .sort(function (a, b) { return a.weekday - b.weekday || String(a.time).localeCompare(String(b.time)); }));
+  }
+  function openScheduleChangeDialog(studentId, hasNew) {
+    var close;
+    var apply = actButton('primary', hasNew ? 'Видалити їх і створити за новим розкладом' : 'Видалити їх', async function () {
+      var res = await sb.rpc('reset_schedule_lessons', { p_student_id: studentId });
+      if (res.error) throw res.error;
+      close(); await refresh({ silent: true });
+      toast(hasNew ? createdText(res.data || 0) : 'Майбутні заняття за старим розкладом видалено.');
+    });
+    var keep = actButton('ghost', 'Лишити як є', async function () {
+      var n = hasNew ? await generateSchedule(studentId, true) : 0;
+      close(); await refresh({ silent: true });
+      toast(n === null ? SCHEDULE_FIX : (n > 0 ? 'Старі заняття лишились. ' + createdText(n) : 'Старі заняття лишились.'), n === null ? { error: true } : undefined);
+    });
+    close = openModal('Розклад змінено', (S.studentMap[studentId] || {}).name || '',
+      h('div', { class: 'stack' },
+        h('p', { class: 'note late', text: 'У календарі лишились майбутні заплановані заняття за старим розкладом. Видалити їх? Проведені, скасовані й перенесені заняття не зачіпаються.' }),
+        apply, keep));
+  }
+
+  // ---------- додати, змінити, видалити заняття ----------
+  async function findConflicts(startMs, durMin, excludeId) {
+    var res = await sb.from('lessons').select('*').gte('starts_at', isoOf(startMs - 6 * 3600000)).lt('starts_at', isoOf(startMs + durMin * 60000)).in('status', ['planned', 'done', 'lost']);
+    if (res.error) return [];
+    return (res.data || []).filter(function (l) {
+      if (l.id === excludeId) return false;
+      var s = new Date(l.starts_at).getTime(), e = s + (l.duration_min || 50) * 60000;
+      return s < startMs + durMin * 60000 && e > startMs;
+    });
+  }
+  function lessonWho(l) { return l.kind === 'consultation' ? l.guest_name : ((S.studentMap[l.student_id] || {}).name || 'учень'); }
+
+  function openLessonForm(o) {
+    o = o || {};
+    var edit = o.edit || null;
+    var kind = edit ? edit.kind : 'lesson';
+    var err = errBox();
+    var warn = h('div', { class: 'note late', role: 'alert', hidden: true });
+    var confirmed = false, durTouched = !!edit;
+    var defDur = function (id) { var st = S.studentMap[id]; return (st && st.lesson_duration_min) || S.settings.default_duration_min || 50; };
+
+    var stOpts = [['', 'Обери учня']].concat(S.students.filter(function (s) { return s.status !== 'ended' || (edit && s.id === edit.student_id); })
+      .sort(function (a, b) { return a.name.localeCompare(b.name, 'uk'); }).map(function (s) { return [s.id, s.name]; }));
+    var student = sel(stOpts, edit ? edit.student_id : '');
+    var guest = h('input', { type: 'text', maxlength: '120', autocomplete: 'off', placeholder: 'Імʼя людини' }); guest.value = edit && edit.guest_name ? edit.guest_name : '';
+    var startMs0 = edit ? new Date(edit.starts_at).getTime() : null;
+    var date = h('input', { type: 'date' }); date.value = edit ? kyivDateStr(startMs0) : (o.date || todayStr());
+    var time = h('input', { type: 'time' }); time.value = edit ? fmtTime(startMs0) : '';
+    var dur = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'off' }); dur.value = edit ? String(edit.duration_min || 50) : String(S.settings.default_duration_min || 50);
+    var hint = h('div', { class: 'hint' });
+
+    var studentField = field('Учень', student), guestField = field('Імʼя', guest);
+    var seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Тип' });
+    function drawKind() {
+      studentField.hidden = kind !== 'lesson'; guestField.hidden = kind !== 'consultation';
+      if (!edit) {
+        seg.replaceChildren.apply(seg, [['lesson', 'Заняття'], ['consultation', 'Консультація']].map(function (k) {
+          return h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(kind === k[0]), text: k[1], onclick: function () { kind = k[0]; resetConfirm(); drawKind(); } });
+        }));
+      }
+    }
+    function updateHint() {
+      var ms = /^\d{4}-\d{2}-\d{2}$/.test(date.value) && /^\d{2}:\d{2}$/.test(time.value) ? parseWallString(date.value + 'T' + time.value) : NaN;
+      hint.textContent = !isNaN(ms) && ms < Date.now() ? 'Це час у минулому: заняття зʼявиться в «Не забути», щоб ти його відмітила.' : '';
+    }
+    var save;
+    function resetConfirm() { confirmed = false; warn.hidden = true; if (save) save.textContent = 'Зберегти'; updateHint(); }
+    [date, time, dur, student].forEach(function (el) { el.addEventListener('input', resetConfirm); el.addEventListener('change', resetConfirm); });
+    dur.addEventListener('input', function () { durTouched = true; });
+    student.addEventListener('change', function () { if (!durTouched && student.value) dur.value = String(defDur(student.value)); });
+
+    var close;
+    save = actButton('primary', 'Зберегти', async function () {
+      err.hidden = true;
+      var sid = student.value || null;
+      if (kind === 'lesson' && !sid) { showErr(err, 'Обери учня.'); student.focus(); return; }
+      var gname = guest.value.trim();
+      if (kind === 'consultation' && !gname) { showErr(err, 'Вкажи імʼя людини для консультації.'); guest.focus(); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date.value)) { showErr(err, 'Вкажи дату.'); date.focus(); return; }
+      if (!/^\d{2}:\d{2}$/.test(time.value)) { showErr(err, 'Вкажи час початку.'); time.focus(); return; }
+      var d = dur.value.trim(), dn = Number(d);
+      if (!/^\d+$/.test(d) || dn < 10 || dn > 240) { showErr(err, 'Тривалість заняття: число хвилин від 10 до 240.'); dur.focus(); return; }
+      var ms = parseWallString(date.value + 'T' + time.value);
+      if (isNaN(ms)) { showErr(err, 'Не вдалося прочитати дату й час.'); return; }
+      var conflicts = await findConflicts(ms, dn, edit && edit.id);
+      var same = kind === 'lesson' && conflicts.some(function (c) { return c.kind === 'lesson' && c.student_id === sid && new Date(c.starts_at).getTime() === ms; });
+      if (same) { showErr(err, 'У цього учня вже є заняття на цей час.'); return; }
+      if (conflicts.length && !confirmed) {
+        warn.textContent = 'У цей час уже є: ' + conflicts.map(function (c) { return fmtTime(new Date(c.starts_at).getTime()) + ' ' + lessonWho(c); }).join(', ') + '. Якщо так і задумано, збережи ще раз.';
+        warn.hidden = false; confirmed = true; save.textContent = 'Все одно зберегти';
+        return;
+      }
+      var row = kind === 'lesson'
+        ? { student_id: sid, guest_name: null, starts_at: isoOf(ms), duration_min: dn }
+        : { student_id: null, guest_name: gname, starts_at: isoOf(ms), duration_min: dn };
+      var res;
+      if (edit) res = await sb.from('lessons').update(row).eq('id', edit.id);
+      else res = await sb.from('lessons').insert(Object.assign({ kind: kind, status: 'planned', from_schedule: false }, row));
+      if (res.error) {
+        if (res.error.code === '23505') { showErr(err, 'У цього учня вже є заняття на цей час.'); return; }
+        throw res.error;
+      }
+      close();
+      if (S.route.name === 'schedule') { S.schedWeek = mondayOf(date.value); S.weekData = null; }
+      await refresh({ silent: true });
+      toast((edit ? 'Заняття змінено: ' : 'Заняття додано: ') + dayLabel(date.value).toLowerCase() + ', ' + time.value + '.');
+    });
+    drawKind(); updateHint();
+    var content = h('div', { class: 'stack' }, err,
+      edit ? null : h('div', { class: 'field' }, h('div', { class: 'label-like', text: 'Що додаємо' }), seg),
+      studentField, guestField,
+      h('div', { class: 'form-grid' }, field('Дата', date), field('Час початку (київський)', time)),
+      hint,
+      field('Тривалість, хв', dur),
+      warn,
+      h('div', { class: 'slot-actions' }, save, h('button', { class: 'btn ghost', type: 'button', text: 'Скасувати', onclick: function () { close(); } })));
+    close = openModal(edit ? 'Змінити заняття' : 'Нове заняття', edit ? lessonWho(edit) : null, content, { wide: true });
+  }
+
+  function openDeleteLesson(l) {
+    var close;
+    var ms = new Date(l.starts_at).getTime();
+    var del = actButton('danger', 'Видалити заняття', async function () {
+      must(await sb.from('lessons').delete().eq('id', l.id));
+      close(); await refresh({ silent: true }); toast('Заняття видалено.');
+    });
+    close = openModal('Видалити заняття?', lessonWho(l) + ', ' + fmtDMY(kyivDateStr(ms)) + ', ' + fmtTime(ms),
+      h('div', { class: 'stack' },
+        h('p', { class: 'note bad', text: 'Заняття буде видалено остаточно. Якщо учень просто не прийде, краще скасувати заняття: так збережеться історія.' }),
+        del, h('button', { class: 'btn ghost', type: 'button', text: 'Не видаляти', onclick: function () { close(); } })));
+  }
+
+  // ---------- розділ «Розклад» ----------
+  function renderSchedulePage() {
+    var wk = S.schedWeek, today = todayStr();
+    function go(delta) { S.schedWeek = addDaysStr(S.schedWeek, delta * 7); S.weekData = null; render(); loadRouteSafely(); }
+    var nav = h('div', { class: 'month-nav' },
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Попередній тиждень', text: '‹', onclick: function () { go(-1); } }),
+      h('span', { class: 'month-label', text: weekLabel(wk) }),
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Наступний тиждень', text: '›', onclick: function () { go(1); } }),
+      h('button', { class: 'btn ghost small', type: 'button', text: 'Сьогодні', onclick: function () { S.schedWeek = mondayOf(todayStr()); S.weekData = null; render(); loadRouteSafely(); } }));
+    var body;
+    if (!S.weekData || S.weekData.week !== wk) body = h('p', { class: 'skeleton', text: 'Завантаження…' });
+    else {
+      var byDay = {};
+      S.weekData.lessons.forEach(function (l) { var d = kyivDateStr(new Date(l.starts_at).getTime()); (byDay[d] = byDay[d] || []).push(l); });
+      body = h('div', { class: 'week' }, [0, 1, 2, 3, 4, 5, 6].map(function (i) {
+        var d = addDaysStr(wk, i), items = byDay[d] || [];
+        return h('section', { class: 'day' + (d === today ? ' today' : '') },
+          h('h2', { class: 'day-title' }, dayLabel(d), d === today ? h('span', { class: 'tag ok', text: 'сьогодні' }) : null),
+          items.length ? h('ul', { class: 'timeline' }, items.map(function (l) { return lessonSlot(l, false, true); })) : h('p', { class: 'item-sub', text: 'Занять немає.' }));
+      }));
+    }
+    return page(
+      h('div', { class: 'page-head' }, h('h1', { text: 'Розклад' }),
+        h('button', { class: 'btn primary', type: 'button', text: 'Заняття', onclick: function () { openLessonForm({ date: today }); } })),
+      S.scheduleError ? h('div', { class: 'msg err', role: 'alert', text: 'Автоматичне створення занять не працює. ' + SCHEDULE_FIX }) : null,
+      nav, body);
+  }
+
   // ================= Малювання =================
   var STATUS = {
     done: { label: 'Проведено', cls: 'ok', ic: 'check' },
@@ -1121,7 +1354,7 @@
     rescheduled: { label: 'Перенесено', cls: 'muted' }
   };
 
-  function lessonSlot(l, isNext) {
+  function lessonSlot(l, isNext, manage) {
     var startMs = new Date(l.starts_at).getTime();
     var consult = l.kind === 'consultation';
     var name = consult ? l.guest_name : ((S.studentMap[l.student_id] || {}).name || 'Учень');
@@ -1131,11 +1364,16 @@
       consult ? h('span', { class: 'tag consult', text: 'Консультація' }) : null,
       h('span', { text: (l.duration_min || 50) + ' хв' }),
       st ? h('span', { class: 'tag ' + st.cls }, st.ic ? icon(st.ic) : null, st.label) : null,
+      manage && l.from_schedule ? h('span', { class: 'tag muted', text: 'за розкладом' }) : null,
       l.notes ? h('span', { text: 'є нотатка' }) : null);
     var actions = h('div', { class: 'slot-actions' });
     if (l.status === 'planned') {
       actions.append(actButton('primary small', 'Проведено', function () { return markDone(l); }, 'check'));
       actions.append(h('button', { class: 'btn ghost small', type: 'button', text: 'Скасувати або перенести', onclick: function () { openCancelDialog(l).catch(fail); } }));
+      if (manage && !l.from_schedule) {
+        actions.append(h('button', { class: 'btn link', type: 'button', text: 'Змінити', onclick: function () { openLessonForm({ edit: l }); } }));
+        actions.append(h('button', { class: 'btn link', type: 'button', text: 'Видалити', onclick: function () { openDeleteLesson(l); } }));
+      }
     } else if (l.status === 'done') {
       actions.append(h('button', { class: 'btn link', type: 'button', text: l.notes ? 'Змінити нотатку' : 'Додати нотатку', onclick: function () { openNoteDialog(l); } }));
       actions.append(actButton('link', 'Повернути в заплановані', function () { return undoDone(l); }));
@@ -1261,7 +1499,7 @@
     }, icon(dark ? 'sun' : 'moon')));
     if (withTools) tools.append(h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Вийти', onclick: signOut }, icon('out'), h('span', { text: 'Вийти' })));
     var cur = S.route.name === 'student' ? 'students' : S.route.name;
-    var nav = withTools ? h('nav', { class: 'nav', 'aria-label': 'Розділи' }, [['home', 'Головна', '#/'], ['students', 'Учні', '#/students'], ['payments', 'Оплати', '#/payments']].map(function (n) {
+    var nav = withTools ? h('nav', { class: 'nav', 'aria-label': 'Розділи' }, [['home', 'Головна', '#/'], ['schedule', 'Розклад', '#/schedule'], ['students', 'Учні', '#/students'], ['payments', 'Оплати', '#/payments']].map(function (n) {
       return h('a', { href: n[2], 'aria-current': cur === n[0] ? 'page' : null, text: n[1] });
     })) : null;
     return h('header', { class: 'topbar' }, h('div', { class: 'brand', text: 'Мій CRM' }), nav, tools);
@@ -1301,6 +1539,7 @@
       case 'students': view = renderStudents(); break;
       case 'student': view = renderStudentCard(); break;
       case 'payments': view = renderPaymentsPage(); break;
+      case 'schedule': view = renderSchedulePage(); break;
       default: view = renderHome();
     }
     app.replaceChildren(topbar(true), view);
