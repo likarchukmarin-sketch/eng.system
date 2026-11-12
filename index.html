@@ -568,7 +568,7 @@
       sb.from('student_balance').select('*'),
       sb.from('lessons').select('*').gte('starts_at', iso(range.start)).lt('starts_at', iso(range.end)).order('starts_at', { ascending: true }),
       sb.from('lessons').select('*').eq('status', 'planned').lt('starts_at', iso(nowTs)).order('starts_at', { ascending: true }),
-      sb.from('lessons').select('*').eq('kind', 'lesson').eq('status', 'done').eq('homework_checked', false).gte('starts_at', iso(nowTs - 30 * 86400000)).order('starts_at', { ascending: true }),
+      sb.from('lessons').select('*').eq('kind', 'lesson').eq('status', 'done').eq('imported', false).eq('homework_checked', false).gte('starts_at', iso(nowTs - 30 * 86400000)).order('starts_at', { ascending: true }),
       sb.from('tasks').select('*').eq('done', false).order('due_date', { ascending: true, nullsFirst: false }),
       sb.from('tax_deadlines').select('*').gte('due_date', today).lte('due_date', addDaysStr(today, 30)).order('due_date', { ascending: true }),
       sb.from('stats_month').select('*').eq('month', monthFirst).maybeSingle(),
@@ -916,7 +916,7 @@
     } else if (route.name === 'recap') {
       var ry = S.recapYear, lo = kyivWallToUtc(ry - 1, 1, 1, 0, 0), hi = kyivWallToUtc(ry + 1, 1, 1, 0, 0), rl = [], from = 0;
       for (;;) {
-        var pg = must(await sb.from('lessons').select('student_id,starts_at,duration_min,status,kind,homework_sent,homework_checked')
+        var pg = must(await sb.from('lessons').select('student_id,starts_at,duration_min,status,kind,homework_sent,homework_checked,imported')
           .eq('kind', 'lesson').eq('status', 'done').gte('starts_at', isoOf(lo)).lt('starts_at', isoOf(hi)).order('starts_at', { ascending: true }).range(from, from + 999)) || [];
         rl = rl.concat(pg);
         if (pg.length < 1000) break;
@@ -991,6 +991,7 @@
     var start = h('input', { type: 'date' }); start.value = cur.start_date || '';
     var dur = h('input', { type: 'text', inputmode: 'numeric', placeholder: 'за замовчуванням ' + (S.settings.default_duration_min || 50) }); dur.value = cur.lesson_duration_min || '';
     var notes = h('textarea', {}); notes.value = cur.notes || '';
+    var opening = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'off' }); opening.value = String(cur.opening_balance || 0);
 
     var sched = (cur.schedule || []).map(function (x) { return { weekday: x.weekday, time: x.time }; });
     var schedBox = h('div', { class: 'sched' });
@@ -1022,12 +1023,15 @@
       }
       var d = dur.value.trim(), dn = null;
       if (d) { dn = Number(d); if (!/^\d+$/.test(d) || dn < 10 || dn > 240) { showErr(err, 'Тривалість заняття: число хвилин від 10 до 240.'); dur.focus(); return; } }
+      var ob = opening.value.trim() || '0';
+      if (!/^-?\d+$/.test(ob) || Math.abs(Number(ob)) > 200) { showErr(err, 'Початковий залишок: ціле число занять від −200 до 200, зазвичай 0.'); opening.focus(); return; }
       for (var k = 0; k < sched.length; k++) { if (!/^\d{2}:\d{2}$/.test(sched[k].time || '')) { showErr(err, 'У постійному розкладі вкажи час для кожного дня.'); return; } }
       var row = {
         name: n, contact: c, status: status.value, level: level.value || null,
         board_url: board.value.trim() || null, chat_url: chat.value.trim() || null, materials_url: mats.value.trim() || null,
         birthday: bday.value || null, start_date: start.value || null, lesson_duration_min: dn,
         notes: notes.value.trim() || null,
+        opening_balance: Number(ob),
         schedule: sched.map(function (x) { return { weekday: Number(x.weekday), time: x.time }; })
           .sort(function (a, b) { return a.weekday - b.weekday || a.time.localeCompare(b.time); })
       };
@@ -1062,6 +1066,7 @@
       field('Дошка', board), field('Чат', chat), field('Матеріали', mats),
       h('div', { class: 'form-grid' }, field('День народження', bday), field('Дата початку занять', start)),
       field('Тривалість заняття, хв', dur),
+      field('Початковий залишок, занять', opening, 'Скільки занять було оплачено наперед на початок обліку в CRM. Мінус: проведено, але оплачено пізніше. Зазвичай 0.'),
       h('div', { class: 'field' }, h('div', { class: 'label-like', text: 'Постійний розклад' }), h('div', { class: 'hint', text: 'Час за київським часом. Порожньо, якщо заняття вносяться вручну.' }), schedBox),
       field('Нотатки', notes),
       h('div', { class: 'slot-actions' }, save, h('button', { class: 'btn ghost', type: 'button', text: 'Скасувати', onclick: function () { close(); } })));
@@ -1116,7 +1121,7 @@
     if (!b || (b.lessons_bought === 0 && b.lessons_used === 0)) balBox = h('p', { class: 'item-sub', text: 'Оплат і занять ще немає.' });
     else balBox = h('div', {},
       b.balance < 0 ? h('div', { class: 'danger-text big-bal' }, icon('alert'), balanceText(b.balance)) : h('div', { class: 'big-bal', text: balanceText(b.balance) }),
-      h('div', { class: 'item-sub', text: 'Куплено ' + b.lessons_bought + ', використано ' + b.lessons_used }));
+      h('div', { class: 'item-sub', text: 'Куплено ' + b.lessons_bought + ', використано ' + b.lessons_used + (b.opening_balance ? ', початковий залишок ' + (b.opening_balance > 0 ? '+' : '−') + Math.abs(b.opening_balance) : '') }));
 
     var hist;
     if (!S.card || S.card.id !== st.id) hist = [h('p', { class: 'skeleton', text: 'Завантаження історії…' })];
@@ -1185,8 +1190,11 @@
       student = sel(opts, '');
     }
     var studentId = function () { return fixedId || student.value || null; };
-    var counts = [1, 4, 8, 12];
-    if (counts.indexOf(count) === -1) counts.push(count);
+    var PRESETS = [1, 4, 8, 12];
+    var customMode = PRESETS.indexOf(count) === -1;
+    var customIn = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'off', 'aria-label': 'Своя кількість занять', placeholder: 'Скільки занять' });
+    customIn.value = customMode ? String(count) : '';
+    var customBox = h('div', { class: 'field', hidden: !customMode }, customIn);
     var seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Кількість занять' });
     var sum = h('input', { type: 'text', inputmode: 'decimal', placeholder: 'Сума, грн', autocomplete: 'off' });
     var perLesson = h('div', { class: 'hint' });
@@ -1197,27 +1205,36 @@
       var a = parseMoney(sum.value);
       perLesson.textContent = isNaN(a) || !count ? '' : 'Ціна заняття: ' + money(lessonPrice(a, count));
     }
-    function drawSeg() {
-      seg.replaceChildren.apply(seg, counts.map(function (n) {
-        return h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(n === count), text: n + ' ' + lessonsWord(n),
-          onclick: async function () {
-            count = n; drawSeg(); updatePer();
-            var id = studentId();
-            if (id && !sumTouched) {
-              var s = await suggestedSum(id, n);
-              if (s != null && count === n && !sumTouched) { sum.value = String(Number(s)); updatePer(); }
-            }
-          } });
-      }));
+    async function suggestFor(n) {
+      var id = studentId();
+      if (id && n && !sumTouched) {
+        var sg = await suggestedSum(id, n);
+        if (sg != null && count === n && !sumTouched) { sum.value = String(Number(sg)); updatePer(); }
+      }
     }
+    function drawSeg() {
+      var btns = PRESETS.map(function (n) {
+        return h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(!customMode && n === count), text: n + ' ' + lessonsWord(n),
+          onclick: function () { customMode = false; customBox.hidden = true; count = n; drawSeg(); updatePer(); suggestFor(n); } });
+      });
+      btns.push(h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(customMode), text: 'Інша кількість',
+        onclick: function () { customMode = true; customBox.hidden = false; var v = Number(customIn.value); count = /^\d+$/.test(customIn.value.trim()) && v >= 1 && v <= 100 ? v : null; drawSeg(); updatePer(); customIn.focus(); } }));
+      seg.replaceChildren.apply(seg, btns);
+    }
+    customIn.addEventListener('input', function () {
+      var t = customIn.value.trim(), v = Number(t);
+      count = /^\d+$/.test(t) && v >= 1 && v <= 100 ? v : null;
+      updatePer(); suggestFor(count);
+    });
     sum.addEventListener('input', function () { sumTouched = true; updatePer(); });
     async function applyDefaults() {
       var id = studentId();
       if (!id || edit) return;
       var pk = await lastPackage(id);
       if (pk && !sumTouched) {
-        if (counts.indexOf(pk.lessons_count) === -1) counts.push(pk.lessons_count);
-        count = pk.lessons_count; sum.value = String(Number(pk.total_price)); drawSeg(); updatePer();
+        count = pk.lessons_count; customMode = PRESETS.indexOf(count) === -1; customBox.hidden = !customMode;
+        customIn.value = customMode ? String(count) : '';
+        sum.value = String(Number(pk.total_price)); drawSeg(); updatePer();
       }
     }
     if (student.tagName === 'SELECT') student.addEventListener('change', function () { sumTouched = false; sum.value = ''; applyDefaults(); });
@@ -1228,6 +1245,7 @@
       err.hidden = true;
       var id = studentId();
       if (!id) { showErr(err, 'Обери учня.'); return; }
+      if (!count || !Number.isInteger(count) || count < 1 || count > 100) { showErr(err, 'Вкажи кількість занять числом від 1 до 100.'); customIn.focus(); return; }
       var amount = parseMoney(sum.value);
       if (isNaN(amount) || amount <= 0) { showErr(err, 'Вкажи суму в гривнях, наприклад 2200.'); sum.focus(); return; }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date.value)) { showErr(err, 'Вкажи дату оплати.'); return; }
@@ -1244,7 +1262,7 @@
     });
     var content = h('div', { class: 'stack' }, err,
       h('div', { class: 'field' }, h('div', { class: 'label-like', text: 'Учень' }), student),
-      h('div', { class: 'field' }, h('div', { class: 'label-like', text: 'Абонемент' }), seg),
+      h('div', { class: 'field' }, h('div', { class: 'label-like', text: 'Абонемент' }), seg), customBox,
       field('Сума, грн', sum), perLesson,
       field('Дата оплати', date),
       field('Коментар', note),
@@ -2157,11 +2175,17 @@
       var byMonth = tallyKey(done, function (x) { return x.ym; }), byDay = tallyKey(done, function (x) { return x.day; });
       var bm = topKey(byMonth, function (x, y) { return x < y; }), bd = topKey(byDay, function (x, y) { return x < y; });
       cards.push({ key: 'busiest', lead: 'Найзавантаженіший місяць', big: monthName(bm), textBig: true, unit: cnt(byMonth[bm]), lines: ['Рекордний день: ' + dmFmt.format(utcDate(bd)) + ', ' + cnt(byDay[bd])] });
-      var byDow = tallyKey(done, function (x) { return x.dow === 0 ? 7 : x.dow; }), byHour = tallyKey(done, function (x) { return x.hh; });
-      var wd = topKey(byDow, function (x, y) { return Number(x) < Number(y); }), hr = topKey(byHour, function (x, y) { return Number(x) < Number(y); });
-      cards.push({ key: 'rhythm', lead: 'Улюблений день тижня', big: WEEKDAY_NAMES[Number(wd) % 7], textBig: true, unit: cnt(byDow[wd]), lines: ['Найпопулярніший час: ' + pad(Number(hr)) + ':00'] });
+      var byDow = tallyKey(done, function (x) { return x.dow === 0 ? 7 : x.dow; });
+      var wd = topKey(byDow, function (x, y) { return Number(x) < Number(y); });
+      // час початку відомий лише для занять, внесених у CRM; в імпортованих він умовний
+      var timed = done.filter(function (x) { return !x.l.imported; }), rLines = [];
+      if (timed.length) {
+        var byHour = tallyKey(timed, function (x) { return x.hh; });
+        rLines.push('Найпопулярніший час: ' + pad(Number(topKey(byHour, function (x, y) { return Number(x) < Number(y); }))) + ':00');
+      }
+      cards.push({ key: 'rhythm', lead: 'Улюблений день тижня', big: WEEKDAY_NAMES[Number(wd) % 7], textBig: true, unit: cnt(byDow[wd]), lines: rLines });
     }
-    var sent = done.filter(function (x) { return x.l.homework_sent; }).length, checked = done.filter(function (x) { return x.l.homework_checked; }).length;
+    var sent = done.filter(function (x) { return !x.l.imported && x.l.homework_sent; }).length, checked = done.filter(function (x) { return !x.l.imported && x.l.homework_checked; }).length;
     if (sent > 0) cards.push({ key: 'homework', lead: 'Домашні завдання', big: String(sent), count: { value: sent, fmt: 'int' }, unit: 'надіслано', lines: ['Перевірено: ' + checked] });
 
     var pLines = ['Реальна ставка: ' + fmtRate(c.hourly_rate), 'Після витрат і податку-орієнтиру'];
@@ -2280,6 +2304,7 @@
       h('span', { text: (l.duration_min || 50) + ' хв' }),
       st ? h('span', { class: 'tag ' + st.cls }, st.ic ? icon(st.ic) : null, st.label) : null,
       manage && l.from_schedule ? h('span', { class: 'tag muted', text: 'за розкладом' }) : null,
+      manage && l.imported ? h('span', { class: 'tag muted', text: 'імпортоване' }) : null,
       l.notes ? h('span', { text: 'є нотатка' }) : null);
     var actions = h('div', { class: 'slot-actions' });
     if (l.status === 'planned') {
