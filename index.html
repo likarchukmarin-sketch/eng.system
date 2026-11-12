@@ -225,6 +225,40 @@
   .stat .big-num { display: block; font-size: 1.8rem; line-height: 1.2; }
   .stat .lbl { color: var(--muted); }
   .space-top { margin-top: 16px; }
+
+  /* ---------- статистика ---------- */
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 24px 32px; margin: 8px 0 40px; }
+  .kpi .lbl { color: var(--muted); }
+  .kpi .big-num { display: block; font-size: 2.3rem; line-height: 1.15; }
+  .kpi .item-sub { margin-top: 2px; }
+  .msg.warn { background: var(--warn-soft); color: var(--warn); margin: 0 0 20px; }
+  .msg.warn a { color: inherit; font-weight: 600; }
+  .chart { margin: 0 0 44px; }
+  .chart-title { font-family: var(--serif); font-size: 1.7rem; font-weight: 600; margin-bottom: 8px; }
+  .chart-scroll { overflow-x: auto; padding-bottom: 6px; }
+  .chart svg { display: block; max-width: none; }
+  .chart-axis { stroke: var(--line); stroke-width: 2; }
+  .chart-bar { fill: var(--green); opacity: .5; }
+  .chart-bar.sel { opacity: 1; fill: var(--green-deep); }
+  .chart-bar.ongoing { opacity: .35; }
+  .chart-bar.ongoing.sel { opacity: .7; }
+  .chart-val { fill: var(--muted); font-size: 12px; font-family: var(--sans); }
+  .chart-val.sel, .chart-lbl.sel { fill: var(--ink); font-weight: 600; }
+  .chart-lbl { fill: var(--muted); font-size: 12px; font-family: var(--sans); }
+  .chart-note { fill: var(--muted); font-size: 10px; font-family: var(--sans); }
+  .bridge { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 24px; margin: 0; max-width: 520px; }
+  .bridge dt { color: var(--muted); }
+  .bridge dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .bridge .total { color: var(--ink); font-weight: 700; padding-top: 8px; border-top: 1px solid var(--line); }
+  .cmp-row { display: grid; grid-template-columns: minmax(130px, 1.1fr) minmax(90px, 1fr) minmax(110px, 1fr) minmax(130px, 1fr); gap: 4px 16px; align-items: baseline; padding: 12px 0; border-top: 1px solid var(--line); }
+  .cmp-row:first-child { border-top: 0; }
+  .cmp-name { font-weight: 600; }
+  .cmp-cur { font-family: var(--serif); font-size: 1.35rem; font-weight: 600; }
+  .delta { font-weight: 600; }
+  .delta.up { color: var(--green-deep); }
+  .delta.down { color: var(--danger); }
+  .delta.none { color: var(--muted); font-weight: 400; }
+  @media (max-width: 640px) { .cmp-row { grid-template-columns: 1fr 1fr; } .cmp-name { grid-column: 1 / -1; } }
   .day { margin-bottom: 30px; }
   .day-title { font-size: 1.45rem; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
   .day.today .day-title { color: var(--green-deep); }
@@ -453,7 +487,7 @@
   }
 
   // для перевірок у тестах
-  window.CRM_LOGIC = { kyivWallToUtc: kyivWallToUtc, kyivDateStr: kyivDateStr, dayRange: dayRange, daysToBirthday: daysToBirthday, balanceText: balanceText, plural: plural, kyivWallString: kyivWallString, parseWallString: parseWallString, buildTasks: buildTasks, buildPayments: buildPayments, fmtTime: fmtTime };
+  window.CRM_LOGIC = { kyivWallToUtc: kyivWallToUtc, kyivDateStr: kyivDateStr, dayRange: dayRange, daysToBirthday: daysToBirthday, balanceText: balanceText, plural: plural, kyivWallString: kyivWallString, parseWallString: parseWallString, buildTasks: buildTasks, buildPayments: buildPayments, fmtTime: fmtTime, statsModel: statsModel, aggMonths: aggMonths, compact: compact, pctChange: pctChange };
 
   // ================= DOM-помічники (весь текст — лише textContent) =================
   function h(tag, props) {
@@ -488,7 +522,7 @@
 
   // ================= Стан і доступ до даних =================
   var sb = null;
-  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7), schedWeek: mondayOf(kyivDateStr(Date.now())), weekData: null, genAt: 0, scheduleError: false, expMonth: kyivDateStr(Date.now()).slice(0, 7), expData: null, setData: null, genExpAt: 0, recurringError: false };
+  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7), schedWeek: mondayOf(kyivDateStr(Date.now())), weekData: null, genAt: 0, scheduleError: false, expMonth: kyivDateStr(Date.now()).slice(0, 7), expData: null, setData: null, genExpAt: 0, recurringError: false, statData: null, statType: 'month', statCursor: kyivDateStr(Date.now()).slice(0, 7) };
   var app = document.getElementById('app');
 
   function must(res) { if (res.error) throw res.error; return res.data; }
@@ -725,6 +759,7 @@
     if (parts[0] === 'schedule') return { name: 'schedule' };
     if (parts[0] === 'expenses') return { name: 'expenses' };
     if (parts[0] === 'settings') return { name: 'settings' };
+    if (parts[0] === 'stats') return { name: 'stats' };
     return { name: 'home' };
   }
   var WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'нд'];
@@ -818,6 +853,10 @@
       if (r2[1].error) throw r2[1].error;
       if (S.route !== route) return;
       S.setData = { deadlines: dl, series: r2[1].data || [] };
+    } else if (route.name === 'stats') {
+      var months = must(await sb.from('stats_month').select('*').order('month', { ascending: true })) || [];
+      if (S.route !== route) return;
+      S.statData = { months: months };
     }
   }
   function loadRouteSafely() {
@@ -828,7 +867,7 @@
     });
   }
   function onRouteChange() {
-    S.route = parseRoute(); S.card = null; S.payData = null; S.weekData = null; S.expData = null; S.setData = null; S.error = null;
+    S.route = parseRoute(); S.card = null; S.payData = null; S.weekData = null; S.expData = null; S.setData = null; S.statData = null; S.error = null;
     try { window.scrollTo(0, 0); } catch (e) {}
     render();
     if (S.session && S.settings) loadRouteSafely();
@@ -1652,6 +1691,227 @@
         h('div', { class: 'slot-actions space-top' }, actButton('ghost', 'Зберегти резервну копію', saveBackup))));
   }
 
+  // ================= Крок 6: статистика =================
+  var Q_ROMAN = ['I', 'II', 'III', 'IV'];
+  var monthNameFmt = new Intl.DateTimeFormat('uk-UA', { timeZone: 'UTC', month: 'long' });
+  var monthShortFmt = new Intl.DateTimeFormat('uk-UA', { timeZone: 'UTC', month: 'short' });
+  function ymDate(ym) { var a = ym.split('-').map(Number); return new Date(Date.UTC(a[0], a[1] - 1, 1)); }
+  function monthName(ym) { return monthNameFmt.format(ymDate(ym)); }
+  function monthYearName(ym) { return monthName(ym) + ' ' + ym.slice(0, 4); }
+  function periodSpan(type) { return type === 'month' ? 1 : type === 'quarter' ? 3 : 12; }
+  function periodStartYm(type, ym) {
+    var p = ym.split('-').map(Number);
+    if (type === 'month') return ym;
+    if (type === 'quarter') return p[0] + '-' + pad(Math.floor((p[1] - 1) / 3) * 3 + 1);
+    return p[0] + '-01';
+  }
+  function periodMonthsList(type, ym) {
+    var s = periodStartYm(type, ym), out = [];
+    for (var i = 0; i < periodSpan(type); i++) out.push(shiftMonth(s, i));
+    return out;
+  }
+  function periodLabel(type, ym) {
+    var p = periodStartYm(type, ym).split('-').map(Number);
+    if (type === 'month') return monthYearName(ym);
+    if (type === 'quarter') return Q_ROMAN[Math.floor((p[1] - 1) / 3)] + ' квартал ' + p[0];
+    return String(p[0]);
+  }
+  function roundAway(x) { return x < 0 ? -Math.round(-x) : Math.round(x); }
+  function round2(x) { return roundAway(x * 100) / 100; }
+  var AGG_KEYS = ['income', 'payments_count', 'lessons_done', 'lessons_lost', 'lessons_cancelled', 'hours', 'expenses', 'taxes_paid', 'tax_estimate', 'net_profit'];
+  // та сама арифметика, що у виглядах stats_quarter / stats_year у базі
+  function aggMonths(rows) {
+    var a = {};
+    AGG_KEYS.forEach(function (k) { a[k] = round2(rows.reduce(function (s, r) { return s + (Number(r[k]) || 0); }, 0)); });
+    a.hourly_rate = a.hours > 0 ? roundAway(a.net_profit / a.hours) : null;
+    return a;
+  }
+  function isActiveMonth(r) {
+    return Number(r.income) > 0 || Number(r.lessons_done) + Number(r.lessons_lost) + Number(r.lessons_cancelled) > 0 || Number(r.expenses) > 0 || Number(r.taxes_paid) > 0;
+  }
+  function pctChange(cur, prev) {
+    if (cur == null || prev == null || prev === 0) return null;
+    return Math.round((cur - prev) / Math.abs(prev) * 100);
+  }
+
+  // Усе, що малює сторінка «Статистика», рахується тут (без доступу до сторінки, щоб це можна було перевірити окремо)
+  function statsModel(monthRows, type, cursor, nowYm, cfg) {
+    var byYm = {};
+    monthRows.forEach(function (r) { byYm[r.month.slice(0, 7)] = r; });
+    var sorted = monthRows.slice().sort(function (a, b) { return a.month.localeCompare(b.month); });
+    var first = sorted.find(isActiveMonth);
+    if (!first) return { empty: true };
+    var startYm = first.month.slice(0, 7);
+    var span = periodSpan(type);
+    var minCur = periodStartYm(type, startYm), maxCur = periodStartYm(type, nowYm);
+    var curStart = periodStartYm(type, cursor);
+    if (curStart < minCur) curStart = minCur;
+    if (curStart > maxCur) curStart = maxCur;
+    var rowsOf = function (start) { return periodMonthsList(type, start).map(function (m) { return byYm[m]; }).filter(Boolean); };
+    var inWork = function (m) { return m >= startYm && m <= nowYm; };   // місяці до першої роботи й майбутні не рахуємо
+    var model = { empty: false, type: type, startYm: startYm, nowYm: nowYm, cursor: curStart, label: periodLabel(type, curStart), cur: aggMonths(rowsOf(curStart)) };
+    model.isCurrent = curStart === periodStartYm(type, nowYm);
+    model.canPrev = shiftMonth(curStart, -span) >= minCur;
+    model.canNext = curStart < maxCur;
+    // попередній період
+    var prevStart = shiftMonth(curStart, -span);
+    model.hasPrev = shiftMonth(prevStart, span - 1) >= startYm;
+    model.prev = model.hasPrev ? aggMonths(rowsOf(prevStart)) : null;
+    model.prevLabel = periodLabel(type, prevStart);
+    // графік доходу: місяці, квартали або роки (від першої роботи до вибраного періоду)
+    var limit = type === 'month' ? 12 : type === 'quarter' ? 8 : 10, bars = [], s = curStart;
+    for (var i = 0; i < limit && s >= minCur; i++) {
+      var agg = aggMonths(rowsOf(s));
+      bars.unshift({ start: s, label: type === 'month' ? monthShortFmt.format(ymDate(s)).replace('.', '') : type === 'quarter' ? Q_ROMAN[Math.floor((Number(s.slice(5)) - 1) / 3)] + ' ' + s.slice(2, 4) : s.slice(0, 4),
+        full: periodLabel(type, s), income: agg.income, selected: s === curStart, ongoing: s === periodStartYm(type, nowYm) });
+      s = shiftMonth(s, -span);
+    }
+    model.bars = bars;
+    // найвищий і найнижчий дохід за місяцями
+    var pool = (type === 'month' ? sorted.map(function (r) { return r.month.slice(0, 7); }) : periodMonthsList(type, curStart)).filter(inWork).filter(function (m) { return byYm[m]; });
+    model.months = pool.map(function (m) { return { ym: m, income: Number(byYm[m].income) || 0, ongoing: m === nowYm }; });
+    var best = null, worst = null;
+    model.months.forEach(function (x) { if (!best || x.income > best.income) best = x; if (!worst || x.income < worst.income) worst = x; });
+    model.best = best; model.worst = worst;
+    model.allEqual = !!best && best.income === worst.income;
+    if (type === 'month') {
+      var here = model.months.find(function (x) { return x.ym === curStart; });
+      model.rank = here ? 1 + model.months.filter(function (x) { return x.income > here.income; }).length : null;
+      model.rankOf = model.months.length;
+    }
+    // найкращий і найгірший квартал року
+    if (type === 'year') {
+      var qs = [0, 3, 6, 9].map(function (k) { return shiftMonth(curStart, k); }).filter(function (q) { return shiftMonth(q, 2) >= startYm && q <= nowYm; })
+        .map(function (q) { return { ym: q, label: periodLabel('quarter', q), income: aggMonths(periodMonthsList('quarter', q).map(function (m) { return byYm[m]; }).filter(Boolean)).income }; });
+      model.quarters = qs;
+      qs.forEach(function (x) { if (!model.bestQ || x.income > model.bestQ.income) model.bestQ = x; if (!model.worstQ || x.income < model.worstQ.income) model.worstQ = x; });
+    }
+    // податок за квартал: дохід кварталу × ставка + повний ЄСВ за квартал
+    var taxQs = type === 'year' ? [0, 3, 6, 9].map(function (k) { return shiftMonth(curStart, k); }) : [periodStartYm('quarter', curStart)];
+    model.taxes = taxQs.filter(function (q) { return shiftMonth(q, 2) >= startYm && q <= nowYm; }).map(function (q) {
+      var a = aggMonths(periodMonthsList('quarter', q).map(function (m) { return byYm[m]; }).filter(Boolean));
+      var rate = Number(cfg.tax_rate) || 0, esv = Number(cfg.esv_quarter) || 0;
+      var tax = round2(a.income * rate + esv);
+      return { ym: q, label: periodLabel('quarter', q), income: a.income, incomeTax: round2(a.income * rate), esv: esv, tax: tax, paid: a.taxes_paid, left: Math.max(0, round2(tax - a.taxes_paid)), over: round2(a.taxes_paid - tax) > 0 ? round2(a.taxes_paid - tax) : 0 };
+    });
+    model.allTimeIncome = round2(sorted.filter(function (r) { return r.month.slice(0, 7) >= startYm && r.month.slice(0, 7) <= nowYm; }).reduce(function (s, r) { return s + (Number(r.income) || 0); }, 0));
+    model.allTimeMonths = sorted.filter(function (r) { return inWork(r.month.slice(0, 7)); }).length;
+    return model;
+  }
+
+  function fmtHours(x) { return String(Number(x).toFixed(1)).replace('.', ',') + ' год'; }
+  function fmtRate(x) { return x == null ? '—' : money(x) + '/год'; }
+  function compact(n) { n = Math.round(n); return n >= 1000 ? String(Number((n / 1000).toFixed(n % 1000 === 0 ? 0 : 1))).replace('.', ',') + ' тис.' : String(n); }
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs) {
+    var el = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    for (var i = 2; i < arguments.length; i++) { var kid = arguments[i]; if (kid != null) el.append(kid.nodeType ? kid : document.createTextNode(String(kid))); }
+    return el;
+  }
+
+  function renderIncomeChart(model) {
+    var bars = model.bars, bw = model.type === 'month' ? 52 : 64, gap = 10, top = 26, plotH = 150, left = 8;
+    var max = Math.max.apply(null, bars.map(function (b) { return b.income; }).concat([1]));
+    var width = left * 2 + bars.length * (bw + gap) - gap, height = top + plotH + 38;
+    var title = { month: 'Дохід по місяцях', quarter: 'Дохід по кварталах', year: 'Дохід по роках' }[model.type];
+    var svg = svgEl('svg', { viewBox: '0 0 ' + width + ' ' + height, width: width, height: height, role: 'img',
+      'aria-label': title + ': ' + bars.map(function (b) { return b.full + ' — ' + money(b.income) + (b.ongoing ? ' (ще триває)' : ''); }).join('; ') });
+    svg.append(svgEl('line', { x1: 0, x2: width, y1: top + plotH, y2: top + plotH, class: 'chart-axis' }));
+    bars.forEach(function (b, i) {
+      var x = left + i * (bw + gap), hgt = b.income > 0 ? Math.max(3, Math.round(b.income / max * plotH)) : 0, y = top + plotH - hgt;
+      svg.append(svgEl('rect', { x: x, y: y, width: bw, height: hgt, rx: 6, class: 'chart-bar' + (b.selected ? ' sel' : '') + (b.ongoing ? ' ongoing' : '') }));
+      svg.append(svgEl('text', { x: x + bw / 2, y: (hgt ? y : top + plotH) - 6, 'text-anchor': 'middle', class: 'chart-val' + (b.selected ? ' sel' : '') }, compact(b.income)));
+      svg.append(svgEl('text', { x: x + bw / 2, y: top + plotH + 20, 'text-anchor': 'middle', class: 'chart-lbl' + (b.selected ? ' sel' : '') }, b.label));
+      if (b.ongoing) svg.append(svgEl('text', { x: x + bw / 2, y: top + plotH + 34, 'text-anchor': 'middle', class: 'chart-note' }, 'триває'));
+    });
+    return h('figure', { class: 'chart' }, h('figcaption', { class: 'chart-title', text: title }), h('div', { class: 'chart-scroll' }, svg));
+  }
+
+  function deltaCell(cur, prev, isMoney) {
+    var p = pctChange(cur, prev);
+    if (p == null) return h('span', { class: 'delta none', text: '—' });
+    if (p === 0) return h('span', { class: 'delta none', text: 'без змін' });
+    var up = p > 0;
+    return h('span', { class: 'delta ' + (up ? 'up' : 'down') }, (up ? '▲ +' : '▼ −') + Math.abs(p) + '% ' + (up ? 'більше' : 'менше'));
+  }
+
+  function renderStatsPage() {
+    var d = S.statData;
+    var types = [['month', 'Місяць'], ['quarter', 'Квартал'], ['year', 'Рік']];
+    var seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Період' }, types.map(function (t) {
+      return h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(S.statType === t[0]), text: t[1], onclick: function () { S.statType = t[0]; render(); } });
+    }));
+    var head = h('div', { class: 'page-head' }, h('h1', { text: 'Статистика' }), seg);
+    if (!d) return page(head, h('p', { class: 'skeleton', text: 'Завантаження…' }));
+    var nowYm = todayStr().slice(0, 7);
+    var m = statsModel(d.months, S.statType, S.statCursor, nowYm, S.settings);
+    if (m.empty) return page(head, h('p', { class: 'item-sub', text: 'Даних для статистики ще немає. Внеси оплату або відміть проведене заняття, і тут зʼявляться цифри.' }));
+    S.statCursor = m.cursor;
+    var step = periodSpan(S.statType);
+    function move(delta) { S.statCursor = shiftMonth(m.cursor, delta * step); render(); }
+    var nav = h('div', { class: 'month-nav' },
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Попередній період', text: '‹', disabled: !m.canPrev, onclick: function () { move(-1); } }),
+      h('span', { class: 'month-label', text: m.label }),
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Наступний період', text: '›', disabled: !m.canNext, onclick: function () { move(1); } }),
+      !m.isCurrent ? h('button', { class: 'btn ghost small', type: 'button', text: 'Сьогодні', onclick: function () { S.statCursor = nowYm; render(); } }) : null);
+    var c = m.cur, ongoingNote = m.isCurrent ? h('p', { class: 'item-sub', text: 'Цей період ще триває, тому цифри неповні.' }) : null;
+    var noEsv = !(Number(S.settings.esv_quarter) > 0)
+      ? h('div', { class: 'msg warn', role: 'status' }, 'ЄСВ за квартал не внесено в ', h('a', { href: '#/settings', text: 'Налаштування' }), ': податок-орієнтир занижений, а прибуток завищений.') : null;
+    function kpi(label, value, sub) { return h('div', { class: 'kpi' }, h('div', { class: 'lbl', text: label }), h('div', { class: 'big-num', text: value }), sub ? h('div', { class: 'item-sub', text: sub }) : null); }
+    var kpis = h('div', { class: 'kpi-grid' },
+      kpi('Дохід', money(c.income), c.payments_count + ' ' + plural(c.payments_count, 'оплата', 'оплати', 'оплат')),
+      kpi('Чистий прибуток', money(c.net_profit)),
+      kpi('Реальна ставка', fmtRate(c.hourly_rate), S.statType === 'month' ? 'за місяць вона стрибає: оплати надходять нерівномірно, точніше видно за квартал' : null),
+      kpi('Години', fmtHours(c.hours), 'проведено ' + c.lessons_done + ', згоріло ' + c.lessons_lost + ', скасовано ' + c.lessons_cancelled));
+    var bridge = h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'З чого складається прибуток' })),
+      h('dl', { class: 'bridge' },
+        h('dt', { text: 'Дохід' }), h('dd', { text: money(c.income) }),
+        h('dt', { text: 'Витрати без податків' }), h('dd', { text: '− ' + money(c.expenses) }),
+        h('dt', { text: 'Податок-орієнтир' }), h('dd', { text: '− ' + money(c.tax_estimate) }),
+        h('dt', { class: 'total', text: 'Чистий прибуток' }), h('dd', { class: 'total', text: money(c.net_profit) })),
+      h('p', { class: 'hint', text: 'Податок-орієнтир за кожен місяць = дохід × ' + Number((Number(S.settings.tax_rate) * 100).toFixed(2)) + '% + ЄСВ ÷ 3. Фактично сплачені податки (' + money(c.taxes_paid) + ') від прибутку вдруге не віднімаються.' }));
+
+    // підсумок: найвищий і найнижчий дохід
+    function monthLine(label, x) { return h('li', { class: 'item' }, h('div', { class: 'item-main' }, h('span', { text: label })), h('div', { class: 'pay-side' }, h('span', { class: 'pay-sum', text: money(x.income) }), h('div', { class: 'item-sub', text: monthYearName(x.ym) + (x.ongoing ? ', ще триває' : '') }))); }
+    var summaryItems = [];
+    if (S.statType === 'month') {
+      if (m.rankOf > 1) summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Цей місяць: ' + m.rank + '-й за доходом із ' + m.rankOf + ' ' + plural(m.rankOf, 'місяця', 'місяців', 'місяців') + ' роботи' })));
+      else summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Це перший місяць із даними.' })));
+    }
+    var scope = { month: 'за весь час', quarter: 'у кварталі', year: 'за рік' }[S.statType];
+    if (m.months.length > 1 && !m.allEqual) { summaryItems.push(monthLine('Найвищий дохід ' + scope, m.best)); summaryItems.push(monthLine('Найнижчий дохід ' + scope, m.worst)); }
+    else if (m.months.length > 1) summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Дохід у всіх місяцях однаковий: ' + money(m.best.income) + '.' })));
+    else if (S.statType !== 'month') summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'У цьому періоді поки лише один місяць із даними: порівнювати нічого.' })));
+    if (S.statType === 'year' && m.quarters && m.quarters.length > 1 && m.bestQ.income !== m.worstQ.income) {
+      summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Найкращий квартал: ' + m.bestQ.label }), h('span', { class: 'pay-sum', text: money(m.bestQ.income) })));
+      summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Найнижчий квартал: ' + m.worstQ.label }), h('span', { class: 'pay-sum', text: money(m.worstQ.income) })));
+    }
+    summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Дохід за весь час (' + m.allTimeMonths + ' ' + plural(m.allTimeMonths, 'місяць', 'місяці', 'місяців') + ')' }), h('span', { class: 'pay-sum', text: money(m.allTimeIncome) })));
+    var summary = h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Підсумок' })), h('ul', { class: 'list' }, summaryItems));
+
+    // порівняння з минулим періодом
+    var prevWord = { month: 'минулим місяцем', quarter: 'минулим кварталом', year: 'минулим роком' }[S.statType];
+    var cmpRows = [['Дохід', 'income', money], ['Проведені заняття', 'lessons_done', function (x) { return String(x); }], ['Чистий прибуток', 'net_profit', money], ['Реальна ставка', 'hourly_rate', fmtRate]];
+    var cmp = h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Порівняння з ' + prevWord }), m.hasPrev ? h('span', { class: 'count', text: m.prevLabel }) : null),
+      m.hasPrev ? h('div', { class: 'cmp' }, cmpRows.map(function (r) {
+        return h('div', { class: 'cmp-row' }, h('div', { class: 'cmp-name', text: r[0] }), h('div', { class: 'cmp-cur', text: r[2](c[r[1]]) }),
+          h('div', { class: 'cmp-prev item-sub', text: 'було ' + r[2](m.prev[r[1]]) }), deltaCell(c[r[1]], m.prev[r[1]]));
+      })) : h('p', { class: 'item-sub', text: 'Попереднього періоду з даними ще немає.' }),
+      m.hasPrev && m.isCurrent ? h('p', { class: 'hint', text: 'Поточний період ще не завершився: порівняння орієнтовне.' }) : null);
+
+    // податки
+    var taxSection = m.taxes.length ? h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Податки за квартал' })),
+      h('ul', { class: 'list' }, m.taxes.map(function (t) {
+        return h('li', { class: 'item' },
+          h('div', { class: 'item-main' }, h('div', { class: 'pay-title', text: t.label }),
+            h('div', { class: 'item-sub', text: 'Дохід ' + money(t.income) + ' × ' + Number((Number(S.settings.tax_rate) * 100).toFixed(2)) + '% = ' + money(t.incomeTax) + ', ЄСВ ' + money(t.esv) + '. Сплачено ' + money(t.paid) + '.' })),
+          h('div', { class: 'pay-side' }, h('div', { class: 'pay-sum', text: money(t.tax) }), h('div', { class: 'item-sub', text: t.over > 0 ? 'сплачено більше на ' + money(t.over) : 'лишилось ' + money(t.left) })));
+      })), h('p', { class: 'hint', text: 'Це орієнтир, а не розрахунок для декларації. Відкласти за квартал = дохід × ставка + ЄСВ за квартал.' })) : null;
+
+    return page(head, nav, noEsv, ongoingNote, kpis, renderIncomeChart(m), summary, bridge, cmp, taxSection);
+  }
+
   // ================= Малювання =================
   var STATUS = {
     done: { label: 'Проведено', cls: 'ok', ic: 'check' },
@@ -1807,7 +2067,7 @@
     }, icon(dark ? 'sun' : 'moon')));
     if (withTools) tools.append(h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Вийти', onclick: signOut }, icon('out'), h('span', { text: 'Вийти' })));
     var cur = S.route.name === 'student' ? 'students' : S.route.name;
-    var nav = withTools ? h('nav', { class: 'nav', 'aria-label': 'Розділи' }, [['home', 'Головна', '#/'], ['schedule', 'Розклад', '#/schedule'], ['students', 'Учні', '#/students'], ['payments', 'Оплати', '#/payments'], ['expenses', 'Витрати', '#/expenses'], ['settings', 'Налаштування', '#/settings']].map(function (n) {
+    var nav = withTools ? h('nav', { class: 'nav', 'aria-label': 'Розділи' }, [['home', 'Головна', '#/'], ['schedule', 'Розклад', '#/schedule'], ['students', 'Учні', '#/students'], ['payments', 'Оплати', '#/payments'], ['expenses', 'Витрати', '#/expenses'], ['stats', 'Статистика', '#/stats'], ['settings', 'Налаштування', '#/settings']].map(function (n) {
       return h('a', { href: n[2], 'aria-current': cur === n[0] ? 'page' : null, text: n[1] });
     })) : null;
     return h('header', { class: 'topbar' }, h('div', { class: 'brand', text: 'Мій CRM' }), nav, tools);
@@ -1850,6 +2110,7 @@
       case 'schedule': view = renderSchedulePage(); break;
       case 'expenses': view = renderExpensesPage(); break;
       case 'settings': view = renderSettingsPage(); break;
+      case 'stats': view = renderStatsPage(); break;
       default: view = renderHome();
     }
     app.replaceChildren(topbar(true), view);
