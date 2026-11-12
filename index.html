@@ -442,12 +442,10 @@
     (s.pendingExpenses || []).forEach(function (e) {
       out.push({ key: 'exp-' + e.id, type: 'expense', expense: e, text: 'Підтверди витрату ' + (e.description || CATEGORIES[e.category] || e.category), sub: fmtDMY(e.spent_at) + ', ' + money(e.amount) });
     });
-    // 6. Кінець місяця
-    var t = today.split('-').map(Number);
-    var lastDay = new Date(Date.UTC(t[0], t[1], 0)).getUTCDate();
-    var hasActive = s.students.some(function (x) { return x.status === 'active'; });
-    if (hasActive && t[2] >= lastDay - 2) {
-      out.push({ key: 'summaries', type: 'summaries', text: 'Допиши підсумки учнів', sub: 'Кінець місяця' });
+    // 6. Підсумки учнів: за останні 2 дні місяця й до 7-го числа наступного, поки не написано всі
+    var sp = s.summaryProgress;
+    if (sp && sp.total > 0 && sp.written < sp.total) {
+      out.push({ key: 'summaries', type: 'summaries', month: sp.month, text: 'Допиши підсумки учнів', sub: monthName(sp.month) + ': написано ' + sp.written + ' з ' + sp.total });
     }
     // 6б. Резервна копія раз на тиждень
     var lastBackup = s.settings.last_backup_at ? new Date(s.settings.last_backup_at).getTime() : 0;
@@ -487,7 +485,7 @@
   }
 
   // для перевірок у тестах
-  window.CRM_LOGIC = { kyivWallToUtc: kyivWallToUtc, kyivDateStr: kyivDateStr, dayRange: dayRange, daysToBirthday: daysToBirthday, balanceText: balanceText, plural: plural, kyivWallString: kyivWallString, parseWallString: parseWallString, buildTasks: buildTasks, buildPayments: buildPayments, fmtTime: fmtTime, statsModel: statsModel, aggMonths: aggMonths, compact: compact, pctChange: pctChange };
+  window.CRM_LOGIC = { kyivWallToUtc: kyivWallToUtc, kyivDateStr: kyivDateStr, dayRange: dayRange, daysToBirthday: daysToBirthday, balanceText: balanceText, plural: plural, kyivWallString: kyivWallString, parseWallString: parseWallString, buildTasks: buildTasks, buildPayments: buildPayments, fmtTime: fmtTime, statsModel: statsModel, aggMonths: aggMonths, compact: compact, pctChange: pctChange, summaryTarget: summaryTarget };
 
   // ================= DOM-помічники (весь текст — лише textContent) =================
   function h(tag, props) {
@@ -522,7 +520,7 @@
 
   // ================= Стан і доступ до даних =================
   var sb = null;
-  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7), schedWeek: mondayOf(kyivDateStr(Date.now())), weekData: null, genAt: 0, scheduleError: false, expMonth: kyivDateStr(Date.now()).slice(0, 7), expData: null, setData: null, genExpAt: 0, recurringError: false, statData: null, statType: 'month', statCursor: kyivDateStr(Date.now()).slice(0, 7) };
+  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7), schedWeek: mondayOf(kyivDateStr(Date.now())), weekData: null, genAt: 0, scheduleError: false, expMonth: kyivDateStr(Date.now()).slice(0, 7), expData: null, setData: null, genExpAt: 0, recurringError: false, statData: null, sumData: null, sumMonth: (summaryTarget(kyivDateStr(Date.now())) || kyivDateStr(Date.now()).slice(0, 7)), statType: 'month', statCursor: kyivDateStr(Date.now()).slice(0, 7) };
   var app = document.getElementById('app');
 
   function must(res) { if (res.error) throw res.error; return res.data; }
@@ -564,6 +562,21 @@
     next.month = r[8].error ? null : r[8].data;
     next.nextLesson = (must(r[9]) || [])[0] || null;
     next.pendingExpenses = r[10].error ? [] : (r[10].data || []);
+    // прогрес підсумків місяця (лише коли їх пора писати)
+    var target = summaryTarget(today), progress = null;
+    if (target) {
+      var rg = monthRangeUtc(target);
+      var pr = await Promise.all([
+        sb.from('lessons').select('student_id').eq('kind', 'lesson').eq('status', 'done').gte('starts_at', iso(rg.start)).lt('starts_at', iso(rg.end)),
+        sb.from('monthly_summaries').select('student_id,text').eq('month', target + '-01')
+      ]);
+      if (!pr[0].error && !pr[1].error) {
+        var ids = {};
+        (pr[0].data || []).forEach(function (x) { ids[x.student_id] = 1; });
+        progress = { month: target, total: Object.keys(ids).length, written: (pr[1].data || []).filter(function (x) { return ids[x.student_id] && String(x.text || '').trim(); }).length };
+      }
+    }
+    next.summaryProgress = progress;
     next.todayStr = today;
     next.loadedAt = nowTs;
     next.noAccess = false;
@@ -760,6 +773,7 @@
     if (parts[0] === 'expenses') return { name: 'expenses' };
     if (parts[0] === 'settings') return { name: 'settings' };
     if (parts[0] === 'stats') return { name: 'stats' };
+    if (parts[0] === 'summaries') return { name: 'summaries' };
     return { name: 'home' };
   }
   var WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'нд'];
@@ -808,7 +822,8 @@
       var id = route.id;
       var r = await Promise.all([
         sb.from('lessons').select('*').eq('student_id', id).order('starts_at', { ascending: false }).limit(200),
-        sb.from('packages').select('*').eq('student_id', id).order('purchased_at', { ascending: false })
+        sb.from('packages').select('*').eq('student_id', id).order('purchased_at', { ascending: false }),
+        sb.from('monthly_summaries').select('*').eq('student_id', id)
       ]);
       var pk = must(r[1]) || [];
       var pays = [];
@@ -816,7 +831,7 @@
       var les = must(r[0]) || [];
       if (S.route !== route) return;
       pays.sort(function (a, b) { return String(b.paid_at).localeCompare(String(a.paid_at)); });
-      S.card = { id: id, lessons: les, packages: pk, payments: pays };
+      S.card = { id: id, lessons: les, packages: pk, payments: pays, summaries: r[2].error ? [] : (r[2].data || []) };
     } else if (route.name === 'payments') {
       var month = S.payMonth;
       var first = month + '-01';
@@ -853,6 +868,20 @@
       if (r2[1].error) throw r2[1].error;
       if (S.route !== route) return;
       S.setData = { deadlines: dl, series: r2[1].data || [] };
+    } else if (route.name === 'summaries') {
+      var sm = S.sumMonth, rg2 = monthRangeUtc(sm);
+      var r4 = await Promise.all([
+        sb.from('lessons').select('*').eq('kind', 'lesson').eq('status', 'done').gte('starts_at', isoOf(rg2.start)).lt('starts_at', isoOf(rg2.end)),
+        sb.from('monthly_summaries').select('*').eq('month', sm + '-01')
+      ]);
+      var dl2 = must(r4[0]) || [], sums = must(r4[1]) || [];
+      if (S.route !== route || S.sumMonth !== sm) return;
+      var per = {};
+      dl2.forEach(function (l) { var x = (per[l.student_id] = per[l.student_id] || { id: l.student_id, done: 0, minutes: 0, written: false }); x.done++; x.minutes += l.duration_min || 50; });
+      sums.forEach(function (x) { if (per[x.student_id] && x.text && String(x.text).trim()) per[x.student_id].written = true; });
+      var list = Object.keys(per).map(function (k) { var x = per[k]; x.name = (S.studentMap[k] || {}).name || 'Учень'; return x; })
+        .sort(function (a, b) { return Number(a.written) - Number(b.written) || a.name.localeCompare(b.name, 'uk'); });
+      S.sumData = { month: sm, rows: list };
     } else if (route.name === 'stats') {
       var months = must(await sb.from('stats_month').select('*').order('month', { ascending: true })) || [];
       if (S.route !== route) return;
@@ -867,7 +896,7 @@
     });
   }
   function onRouteChange() {
-    S.route = parseRoute(); S.card = null; S.payData = null; S.weekData = null; S.expData = null; S.setData = null; S.statData = null; S.error = null;
+    S.route = parseRoute(); S.card = null; S.payData = null; S.weekData = null; S.expData = null; S.setData = null; S.statData = null; S.sumData = null; S.error = null;
     try { window.scrollTo(0, 0); } catch (e) {}
     render();
     if (S.session && S.settings) loadRouteSafely();
@@ -898,7 +927,9 @@
     draw();
     return page(
       h('div', { class: 'page-head' }, h('h1', { text: 'Учні' }),
-        h('button', { class: 'btn primary', type: 'button', text: 'Новий учень', onclick: function () { openStudentForm(null); } })),
+        h('div', { class: 'head-actions' },
+          h('button', { class: 'btn ghost', type: 'button', text: 'Підсумки місяця', onclick: function () { openSummaries(summaryTarget(todayStr()) || todayStr().slice(0, 7)); } }),
+          h('button', { class: 'btn primary', type: 'button', text: 'Новий учень', onclick: function () { openStudentForm(null); } }))),
       h('div', { class: 'toolbar' }, segBox, search),
       listBox);
   }
@@ -1062,6 +1093,7 @@
           }))
         : h('p', { class: 'item-sub', text: 'Занять ще немає.' });
       hist = [
+        renderStudentSummaries(st),
         h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Оплати' })), pays),
         h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Заняття' })), les)
       ];
@@ -1912,6 +1944,107 @@
     return page(head, nav, noEsv, ongoingNote, kpis, renderIncomeChart(m), summary, bridge, cmp, taxSection);
   }
 
+  // ================= Крок 7: підсумки місяця по учнях =================
+  function monthRangeUtc(ym) {
+    var a = ym.split('-').map(Number), n = shiftMonth(ym, 1).split('-').map(Number);
+    return { start: kyivWallToUtc(a[0], a[1], 1, 0, 0), end: kyivWallToUtc(n[0], n[1], 1, 0, 0) };
+  }
+  // За який місяць зараз пора писати підсумки: за останні 2 дні місяця — за цей, до 7-го числа — за минулий
+  function summaryTarget(dateStr) {
+    var a = dateStr.split('-').map(Number), last = new Date(Date.UTC(a[0], a[1], 0)).getUTCDate();
+    if (a[2] <= 7) return shiftMonth(dateStr.slice(0, 7), -1);
+    if (a[2] >= last - 1) return dateStr.slice(0, 7);
+    return null;
+  }
+  function openSummaries(ym) { S.sumMonth = ym; if (location.hash === '#/summaries') onRouteChange(); else location.hash = '#/summaries'; }
+
+  async function openSummaryEditor(studentId, ym) {
+    var st = S.studentMap[studentId] || { name: 'Учень' };
+    var rg = monthRangeUtc(ym);
+    var r = await Promise.all([
+      sb.from('lessons').select('*').eq('student_id', studentId).gte('starts_at', isoOf(rg.start)).lt('starts_at', isoOf(rg.end)).order('starts_at', { ascending: true }),
+      sb.from('monthly_summaries').select('*').eq('student_id', studentId).eq('month', ym + '-01').maybeSingle()
+    ]);
+    var lessons = must(r[0]) || [], existing = must(r[1]);
+    var done = lessons.filter(function (l) { return l.status === 'done'; });
+    var minutes = done.reduce(function (s, l) { return s + (l.duration_min || 50); }, 0);
+    var cnt = function (k) { return lessons.filter(function (l) { return l.status === k; }).length; };
+    var withNotes = lessons.filter(function (l) { return l.status === 'done' && l.notes && String(l.notes).trim(); });
+    var err = errBox();
+    var ta = h('textarea', { 'aria-label': 'Висновок', placeholder: 'Твій висновок за місяць: прогрес, на що звернути увагу, плани' }); ta.value = existing && existing.text ? existing.text : '';
+    var close;
+    var save = actButton('primary', 'Зберегти', async function () {
+      err.hidden = true;
+      var text = ta.value.trim();
+      if (!text) {
+        if (existing) must(await sb.from('monthly_summaries').delete().eq('id', existing.id));
+      } else {
+        must(await sb.from('monthly_summaries').upsert({ student_id: studentId, month: ym + '-01', text: text }, { onConflict: 'student_id,month' }));
+      }
+      close(); await refresh({ silent: true });
+      toast(text ? 'Підсумок збережено.' : (existing ? 'Підсумок очищено.' : 'Висновок порожній, нічого не збережено.'));
+    });
+    var notesBox = withNotes.length
+      ? h('ul', { class: 'list' }, withNotes.map(function (l) {
+          var ms = new Date(l.starts_at).getTime();
+          return h('li', { class: 'item' }, h('div', { class: 'item-main' }, h('div', { class: 'item-sub', text: fmtDMY(kyivDateStr(ms)) }), h('div', { class: 'prewrap', text: l.notes })));
+        }))
+      : h('p', { class: 'item-sub', text: 'Нотаток до занять цього місяця немає. Їх можна додати біля проведеного заняття на Головній або в Розкладі.' });
+    var content = h('div', { class: 'stack' }, err,
+      h('p', { class: 'note', text: 'Проведено ' + done.length + ' ' + lessonsWord(done.length) + ', ' + fmtHours(minutes / 60) + '. Згоріло ' + cnt('lost') + ', скасовано ' + cnt('cancelled') + '.' }),
+      h('div', {}, h('div', { class: 'label-like', text: 'Нотатки до занять' }), notesBox),
+      h('div', { class: 'field' }, h('label', { class: 'label-like', text: 'Висновок' }), ta),
+      h('div', { class: 'slot-actions' }, save, h('button', { class: 'btn ghost', type: 'button', text: 'Закрити', onclick: function () { close(); } })));
+    close = openModal('Підсумок за ' + monthName(ym) + ' ' + ym.slice(0, 4), st.name, content, { wide: true });
+  }
+
+  function renderSummariesPage() {
+    var ym = S.sumMonth, nowYm = todayStr().slice(0, 7);
+    function go(delta) { S.sumMonth = shiftMonth(S.sumMonth, delta); S.sumData = null; render(); loadRouteSafely(); }
+    var nav = h('div', { class: 'month-nav' },
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Попередній місяць', text: '‹', onclick: function () { go(-1); } }),
+      h('span', { class: 'month-label', text: monthYearName(ym) }),
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Наступний місяць', text: '›', disabled: ym >= nowYm, onclick: function () { go(1); } }));
+    var body;
+    if (!S.sumData || S.sumData.month !== ym) body = h('p', { class: 'skeleton', text: 'Завантаження…' });
+    else {
+      var rows = S.sumData.rows, written = rows.filter(function (x) { return x.written; }).length;
+      body = rows.length ? [
+        h('p', { class: 'month-total' }, h('span', { class: 'big-num', text: written + ' з ' + rows.length }), h('span', { class: 'lbl', text: 'підсумків написано' })),
+        h('ul', { class: 'list' }, rows.map(function (x) {
+          return h('li', { class: 'item' },
+            h('div', { class: 'item-main' }, h('div', { class: 'pay-title' }, h('a', { class: 'pay-who first', href: '#/students/' + encodeURIComponent(x.id), text: x.name })),
+              h('div', { class: 'item-sub', text: 'Проведено ' + x.done + ' ' + lessonsWord(x.done) + ', ' + fmtHours(x.minutes / 60) })),
+            h('div', { class: 'item-actions' }, h('span', { class: 'tag ' + (x.written ? 'ok' : 'muted'), text: x.written ? 'написано' : 'не написано' }),
+              h('button', { class: 'btn ' + (x.written ? 'ghost' : 'primary') + ' small', type: 'button', text: x.written ? 'Відкрити' : 'Написати', onclick: function () { openSummaryEditor(x.id, ym).catch(fail); } })));
+        }))
+      ] : h('p', { class: 'item-sub', text: 'У цьому місяці проведених занять немає, підсумки писати не треба.' });
+    }
+    return page(h('p', { class: 'crumb' }, h('a', { href: '#/students', text: 'Усі учні' })), h('div', { class: 'page-head' }, h('h1', { text: 'Підсумки місяця' })), nav, body);
+  }
+
+  // блок у картці учня
+  function renderStudentSummaries(st) {
+    var c = S.card, byMonth = {};
+    c.lessons.forEach(function (l) {
+      if (l.status !== 'done') return;
+      var ym = kyivDateStr(new Date(l.starts_at).getTime()).slice(0, 7);
+      (byMonth[ym] = byMonth[ym] || { ym: ym, done: 0, minutes: 0 });
+      byMonth[ym].done++; byMonth[ym].minutes += l.duration_min || 50;
+    });
+    var written = {};
+    (c.summaries || []).forEach(function (x) { if (x.text && String(x.text).trim()) written[x.month.slice(0, 7)] = true; });
+    var months = Object.keys(byMonth).sort().reverse();
+    return h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Підсумки місяців' })),
+      months.length ? h('ul', { class: 'list' }, months.map(function (ym) {
+        var x = byMonth[ym];
+        return h('li', { class: 'item' },
+          h('div', { class: 'item-main' }, h('div', { class: 'pay-title', text: monthYearName(ym) }), h('div', { class: 'item-sub', text: 'Проведено ' + x.done + ' ' + lessonsWord(x.done) + ', ' + fmtHours(x.minutes / 60) })),
+          h('div', { class: 'item-actions' }, h('span', { class: 'tag ' + (written[ym] ? 'ok' : 'muted'), text: written[ym] ? 'написано' : 'не написано' }),
+            h('button', { class: 'btn ghost small', type: 'button', text: written[ym] ? 'Відкрити' : 'Написати', onclick: function () { openSummaryEditor(st.id, ym).catch(fail); } })));
+      })) : h('p', { class: 'item-sub', text: 'Проведених занять ще немає.' }));
+  }
+
   // ================= Малювання =================
   var STATUS = {
     done: { label: 'Проведено', cls: 'ok', ic: 'check' },
@@ -1979,6 +2112,7 @@
     else if (t.type === 'hw-check') actions.append(actButton('ghost small', 'Перевірено', function () { return checkHw(t.lesson); }));
     else if (t.type === 'expense') actions.append(h('button', { class: 'btn primary small', type: 'button', text: 'Підтвердити', onclick: function () { openConfirmExpense(t.expense); } }));
     else if (t.type === 'backup') actions.append(actButton('ghost small', 'Зберегти копію', saveBackup));
+    else if (t.type === 'summaries') actions.append(h('button', { class: 'btn primary small', type: 'button', text: 'Відкрити', onclick: function () { openSummaries(t.month); } }));
     else if (t.type === 'manual') {
       var cb = h('input', { type: 'checkbox', class: 'check', 'aria-label': 'Виконано: ' + t.text });
       cb.addEventListener('change', act(cb, function () { return finishTask(t.task); }));
@@ -2066,7 +2200,7 @@
       }
     }, icon(dark ? 'sun' : 'moon')));
     if (withTools) tools.append(h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Вийти', onclick: signOut }, icon('out'), h('span', { text: 'Вийти' })));
-    var cur = S.route.name === 'student' ? 'students' : S.route.name;
+    var cur = S.route.name === 'student' || S.route.name === 'summaries' ? 'students' : S.route.name;
     var nav = withTools ? h('nav', { class: 'nav', 'aria-label': 'Розділи' }, [['home', 'Головна', '#/'], ['schedule', 'Розклад', '#/schedule'], ['students', 'Учні', '#/students'], ['payments', 'Оплати', '#/payments'], ['expenses', 'Витрати', '#/expenses'], ['stats', 'Статистика', '#/stats'], ['settings', 'Налаштування', '#/settings']].map(function (n) {
       return h('a', { href: n[2], 'aria-current': cur === n[0] ? 'page' : null, text: n[1] });
     })) : null;
@@ -2111,6 +2245,7 @@
       case 'expenses': view = renderExpensesPage(); break;
       case 'settings': view = renderSettingsPage(); break;
       case 'stats': view = renderStatsPage(); break;
+      case 'summaries': view = renderSummariesPage(); break;
       default: view = renderHome();
     }
     app.replaceChildren(topbar(true), view);
