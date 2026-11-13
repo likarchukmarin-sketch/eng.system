@@ -495,15 +495,15 @@
   }
 
   function buildPayments(s) {
-    var thr = s.settings.soon_pay_threshold, debt = [], soon = [];
+    var thr = s.settings.soon_pay_threshold, debt = [], now = [], soon = [];
     s.balances.forEach(function (b) {
       var st = s.studentMap[b.student_id];
       if (!st || st.status !== 'active') return;
       if (!(b.lessons_bought > 0 || b.lessons_used > 0)) return;
-      if (b.balance < 0) debt.push(b); else if (b.balance <= thr) soon.push(b);
+      if (b.balance < 0) debt.push(b); else if (b.balance === 0) now.push(b); else if (b.balance <= thr) soon.push(b);
     });
     var byBal = function (a, b) { return a.balance - b.balance; };
-    return { debt: debt.sort(byBal), soon: soon.sort(byBal) };
+    return { debt: debt.sort(byBal), now: now, soon: soon.sort(byBal) };
   }
 
   function buildBirthdays(s) {
@@ -846,7 +846,7 @@
     var active = status === 'active';
     if (!active && b.balance === 0) return h('span', { class: 'item-sub', text: 'Залишку немає' });
     var soon = active && b.balance <= S.settings.soon_pay_threshold;
-    return h('span', { class: 'bal' }, h('span', { text: balanceText(b.balance) }), soon ? h('span', { class: 'tag lost', text: 'скоро оплата' }) : null);
+    return h('span', { class: 'bal' }, h('span', { text: balanceText(b.balance) }), soon ? h('span', { class: 'tag lost', text: b.balance <= 0 ? 'потрібна оплата' : 'скоро оплата' }) : null);
   }
 
   // ---------- завантаження даних поточного розділу ----------
@@ -874,10 +874,12 @@
       var rows = must(await sb.from('payments').select('*').gte('paid_at', first).lt('paid_at', nextFirst).order('paid_at', { ascending: false })) || [];
       var pkgs = [];
       if (rows.length) pkgs = must(await sb.from('packages').select('*').in('id', rows.map(function (x) { return x.package_id; }))) || [];
+      var oth = await sb.from('other_income').select('*').gte('received_at', first).lt('received_at', nextFirst).order('received_at', { ascending: false });
+      var othRows = oth.error ? [] : (oth.data || []);
       if (S.route !== route || S.payMonth !== month) return;
       var pkgMap = {};
       pkgs.forEach(function (x) { pkgMap[x.id] = x; });
-      S.payData = { month: month, rows: rows, pkgMap: pkgMap };
+      S.payData = { month: month, rows: rows, pkgMap: pkgMap, other: othRows };
     } else if (route.name === 'schedule') {
       var wk = S.schedWeek, a = wk.split('-').map(Number);
       var e = addDaysStr(wk, 7).split('-').map(Number);
@@ -1289,6 +1291,54 @@
         del, h('button', { class: 'btn ghost', type: 'button', text: 'Не видаляти', onclick: function () { close(); } })));
   }
 
+  // ---------- інший дохід (школа) ----------
+  function otherIncomeRow(x) {
+    return h('li', { class: 'item' },
+      h('div', { class: 'item-main' },
+        h('div', { class: 'pay-title', text: x.source || 'Інший дохід' }),
+        h('div', { class: 'item-sub', text: fmtDMY(x.received_at) + (x.note ? ', ' + x.note : '') })),
+      h('div', { class: 'pay-side' }, h('div', { class: 'pay-sum', text: money(x.amount) }),
+        h('div', { class: 'item-actions' },
+          h('button', { class: 'btn link', type: 'button', text: 'Змінити', onclick: function () { openOtherIncomeForm({ edit: x }); } }),
+          h('button', { class: 'btn link', type: 'button', text: 'Видалити', onclick: function () { openDeleteOtherIncome(x); } }))));
+  }
+  function openOtherIncomeForm(o) {
+    o = o || {};
+    var edit = o.edit || null, err = errBox();
+    var date = h('input', { type: 'date' }); date.value = edit ? edit.received_at : todayStr();
+    var source = h('input', { type: 'text', maxlength: '60', autocomplete: 'off' }); source.value = edit ? (edit.source || '') : 'Школа';
+    var amount = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: 'Сума, грн' }); amount.value = edit ? String(Number(edit.amount)) : '';
+    var note = h('input', { type: 'text', maxlength: '200', autocomplete: 'off', placeholder: 'Наприклад: назва платника' }); note.value = edit && edit.note ? edit.note : '';
+    var close;
+    var save = actButton('primary', 'Зберегти', async function () {
+      err.hidden = true;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date.value)) { showErr(err, 'Вкажи дату надходження.'); date.focus(); return; }
+      var a = parseMoney(amount.value);
+      if (isNaN(a) || a <= 0) { showErr(err, 'Вкажи суму в гривнях, наприклад 4569.'); amount.focus(); return; }
+      var row = { received_at: date.value, source: source.value.trim() || 'Інший дохід', amount: a, note: note.value.trim() || null };
+      var res = edit ? await sb.from('other_income').update(row).eq('id', edit.id) : await sb.from('other_income').insert(row);
+      if (res.error) throw res.error;
+      close();
+      if (S.route.name === 'payments') { S.payMonth = date.value.slice(0, 7); S.payData = null; }
+      await refresh({ silent: true });
+      toast((edit ? 'Зміни збережено.' : 'Надходження додано.') + ' Воно входить у податок-орієнтир.');
+    });
+    close = openModal(edit ? 'Змінити інший дохід' : 'Інший дохід', 'Оплата зі школи та інші надходження ФОП, не повʼязані з учнями.',
+      h('div', { class: 'stack' }, err, h('div', { class: 'form-grid' }, field('Дата надходження', date), field('Звідки', source)), field('Сума, грн', amount), field('Примітка', note),
+        h('p', { class: 'hint', text: 'Входить у податок-орієнтир і «Статистику», але не впливає на години, заняття й баланси учнів.' }),
+        h('div', { class: 'slot-actions' }, save, h('button', { class: 'btn ghost', type: 'button', text: 'Скасувати', onclick: function () { close(); } }))), { wide: true });
+  }
+  function openDeleteOtherIncome(x) {
+    var close;
+    var del = actButton('danger', 'Видалити надходження', async function () {
+      must(await sb.from('other_income').delete().eq('id', x.id));
+      close(); await refresh({ silent: true }); toast('Надходження видалено.');
+    });
+    close = openModal('Видалити надходження?', (x.source || 'Інший дохід') + ', ' + fmtDMY(x.received_at) + ', ' + money(x.amount),
+      h('div', { class: 'stack' }, h('p', { class: 'note bad', text: 'Запис буде видалено остаточно, податок-орієнтир перерахується.' }),
+        del, h('button', { class: 'btn ghost', type: 'button', text: 'Не видаляти', onclick: function () { close(); } })));
+  }
+
   // ---------- розділ «Оплати» ----------
   function shiftMonth(ym, delta) {
     var p = ym.split('-').map(Number);
@@ -1307,10 +1357,19 @@
     if (!S.payData || S.payData.month !== S.payMonth) body = h('p', { class: 'skeleton', text: 'Завантаження…' });
     else {
       var rows = S.payData.rows, total = rows.reduce(function (s, x) { return s + Number(x.amount); }, 0);
-      body = rows.length ? [
-        h('p', { class: 'month-total' }, h('span', { class: 'big-num', text: money(total) }), h('span', { class: 'lbl', text: 'за місяць, оплат: ' + rows.length })),
-        h('ul', { class: 'list' }, rows.map(function (x) { return paymentRow(x, S.payData.pkgMap[x.package_id], true); }))
-      ] : h('p', { class: 'item-sub', text: 'У цьому місяці оплат немає.' });
+      var other = S.payData.other || [], otherTotal = other.reduce(function (s, x) { return s + Number(x.amount); }, 0);
+      body = [
+        rows.length ? [
+          h('p', { class: 'month-total' }, h('span', { class: 'big-num', text: money(total) }), h('span', { class: 'lbl', text: 'від учнів за місяць, оплат: ' + rows.length })),
+          h('ul', { class: 'list' }, rows.map(function (x) { return paymentRow(x, S.payData.pkgMap[x.package_id], true); }))
+        ] : h('p', { class: 'item-sub', text: 'У цьому місяці оплат від учнів немає.' }),
+        h('section', { class: 'section space-top' },
+          h('div', { class: 'section-head' }, h('h2', { text: 'Інший дохід' }),
+            h('button', { class: 'btn ghost small', type: 'button', text: 'Додати інший дохід', onclick: function () { openOtherIncomeForm({}); } })),
+          other.length ? [h('p', { class: 'month-total' }, h('span', { class: 'big-num', text: money(otherTotal) }), h('span', { class: 'lbl', text: 'зі школи та інше, надходжень: ' + other.length })),
+            h('ul', { class: 'list' }, other.map(otherIncomeRow))]
+          : h('p', { class: 'item-sub', text: 'Надходжень зі школи цього місяця немає. Вони входять у податок-орієнтир, але не в заняття й години.' }))
+      ];
     }
     return page(
       h('div', { class: 'page-head' }, h('h1', { text: 'Оплати' }),
@@ -1536,7 +1595,7 @@
   }
 
   // ---------- резервна копія ----------
-  var BACKUP_TABLES = ['settings', 'students', 'packages', 'payments', 'lessons', 'expenses', 'tasks', 'tax_deadlines', 'monthly_summaries'];
+  var BACKUP_TABLES = ['settings', 'students', 'packages', 'payments', 'lessons', 'expenses', 'tasks', 'tax_deadlines', 'monthly_summaries', 'other_income'];
   async function fetchAllRows(table) {
     var out = [], from = 0, size = 1000;
     for (;;) {
@@ -1784,7 +1843,8 @@
       h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Резервна копія' })),
         h('p', { class: 'item-sub', text: last ? 'Остання копія: ' + last + '.' : 'Копій ще не було.' }),
         h('p', { class: 'hint', text: 'Файл містить дані учнів і оплат. Не клади його в публічні місця, зокрема в репозиторій на GitHub.' }),
-        h('div', { class: 'slot-actions space-top' }, actButton('ghost', 'Зберегти резервну копію', saveBackup))));
+        h('div', { class: 'slot-actions space-top' }, actButton('ghost', 'Зберегти резервну копію', saveBackup)),
+        h('p', { class: 'hint space-top' }, 'Якщо базу колись треба відновити: ', h('a', { href: 'restore.html', target: '_blank', rel: 'noopener', text: 'сторінка відновлення з копії' }), '. Вона нічого нікуди не надсилає, лише готує SQL з файлу копії.')));
   }
 
   // ================= Крок 6: статистика =================
@@ -1814,16 +1874,16 @@
   }
   function roundAway(x) { return x < 0 ? -Math.round(-x) : Math.round(x); }
   function round2(x) { return roundAway(x * 100) / 100; }
-  var AGG_KEYS = ['income', 'payments_count', 'lessons_done', 'lessons_lost', 'lessons_cancelled', 'hours', 'expenses', 'taxes_paid', 'tax_estimate', 'net_profit'];
+  var AGG_KEYS = ['income', 'other_income', 'payments_count', 'lessons_done', 'lessons_lost', 'lessons_cancelled', 'hours', 'expenses', 'taxes_paid', 'tax_estimate', 'net_profit', 'tutor_net'];
   // та сама арифметика, що у виглядах stats_quarter / stats_year у базі
   function aggMonths(rows) {
     var a = {};
     AGG_KEYS.forEach(function (k) { a[k] = round2(rows.reduce(function (s, r) { return s + (Number(r[k]) || 0); }, 0)); });
-    a.hourly_rate = a.hours > 0 ? roundAway(a.net_profit / a.hours) : null;
+    a.hourly_rate = a.hours > 0 ? roundAway(a.tutor_net / a.hours) : null;   // ставка лише за репетиторство
     return a;
   }
   function isActiveMonth(r) {
-    return Number(r.income) > 0 || Number(r.lessons_done) + Number(r.lessons_lost) + Number(r.lessons_cancelled) > 0 || Number(r.expenses) > 0 || Number(r.taxes_paid) > 0;
+    return Number(r.income) > 0 || Number(r.other_income) > 0 || Number(r.lessons_done) + Number(r.lessons_lost) + Number(r.lessons_cancelled) > 0 || Number(r.expenses) > 0 || Number(r.taxes_paid) > 0;
   }
   function pctChange(cur, prev) {
     if (cur == null || prev == null || prev === 0) return null;
@@ -1845,6 +1905,7 @@
     if (curStart > maxCur) curStart = maxCur;
     var rowsOf = function (start) { return periodMonthsList(type, start).map(function (m) { return byYm[m]; }).filter(Boolean); };
     var inWork = function (m) { return m >= startYm && m <= nowYm; };   // місяці до першої роботи й майбутні не рахуємо
+    var complete = function (m) { return inWork(m) && m < nowYm; };       // для рейтингів беремо лише завершені місяці
     var model = { empty: false, type: type, startYm: startYm, nowYm: nowYm, cursor: curStart, label: periodLabel(type, curStart), cur: aggMonths(rowsOf(curStart)) };
     model.isCurrent = curStart === periodStartYm(type, nowYm);
     model.canPrev = shiftMonth(curStart, -span) >= minCur;
@@ -1864,20 +1925,20 @@
     }
     model.bars = bars;
     // найвищий і найнижчий дохід за місяцями
-    var pool = (type === 'month' ? sorted.map(function (r) { return r.month.slice(0, 7); }) : periodMonthsList(type, curStart)).filter(inWork).filter(function (m) { return byYm[m]; });
+    var pool = (type === 'month' ? sorted.map(function (r) { return r.month.slice(0, 7); }) : periodMonthsList(type, curStart)).filter(complete).filter(function (m) { return byYm[m]; });
     model.months = pool.map(function (m) { return { ym: m, income: Number(byYm[m].income) || 0, ongoing: m === nowYm }; });
     var best = null, worst = null;
     model.months.forEach(function (x) { if (!best || x.income > best.income) best = x; if (!worst || x.income < worst.income) worst = x; });
     model.best = best; model.worst = worst;
     model.allEqual = !!best && best.income === worst.income;
     if (type === 'month') {
-      var here = model.months.find(function (x) { return x.ym === curStart; });
+      var here = model.months.find(function (x) { return x.ym === curStart; });   // місяць, що триває, у рейтингу не бере участі
       model.rank = here ? 1 + model.months.filter(function (x) { return x.income > here.income; }).length : null;
       model.rankOf = model.months.length;
     }
     // найкращий і найгірший квартал року
     if (type === 'year') {
-      var qs = [0, 3, 6, 9].map(function (k) { return shiftMonth(curStart, k); }).filter(function (q) { return shiftMonth(q, 2) >= startYm && q <= nowYm; })
+      var qs = [0, 3, 6, 9].map(function (k) { return shiftMonth(curStart, k); }).filter(function (q) { return shiftMonth(q, 2) >= startYm && shiftMonth(q, 2) < nowYm; })
         .map(function (q) { return { ym: q, label: periodLabel('quarter', q), income: aggMonths(periodMonthsList('quarter', q).map(function (m) { return byYm[m]; }).filter(Boolean)).income }; });
       model.quarters = qs;
       qs.forEach(function (x) { if (!model.bestQ || x.income > model.bestQ.income) model.bestQ = x; if (!model.worstQ || x.income < model.worstQ.income) model.worstQ = x; });
@@ -1887,10 +1948,11 @@
     model.taxes = taxQs.filter(function (q) { return shiftMonth(q, 2) >= startYm && q <= nowYm; }).map(function (q) {
       var a = aggMonths(periodMonthsList('quarter', q).map(function (m) { return byYm[m]; }).filter(Boolean));
       var rate = Number(cfg.tax_rate) || 0, esv = Number(cfg.esv_quarter) || 0;
-      var tax = round2(a.income * rate + esv);
-      return { ym: q, label: periodLabel('quarter', q), income: a.income, incomeTax: round2(a.income * rate), esv: esv, tax: tax, paid: a.taxes_paid, left: Math.max(0, round2(tax - a.taxes_paid)), over: round2(a.taxes_paid - tax) > 0 ? round2(a.taxes_paid - tax) : 0 };
+      var base = round2(a.income + a.other_income), tax = round2(base * rate + esv);
+      return { ym: q, label: periodLabel('quarter', q), income: a.income, other: a.other_income, incomeTax: round2(base * rate), esv: esv, tax: tax, paid: a.taxes_paid, left: Math.max(0, round2(tax - a.taxes_paid)), over: round2(a.taxes_paid - tax) > 0 ? round2(a.taxes_paid - tax) : 0 };
     });
     model.allTimeIncome = round2(sorted.filter(function (r) { return r.month.slice(0, 7) >= startYm && r.month.slice(0, 7) <= nowYm; }).reduce(function (s, r) { return s + (Number(r.income) || 0); }, 0));
+    model.allTimeOther = round2(sorted.filter(function (r) { return r.month.slice(0, 7) >= startYm && r.month.slice(0, 7) <= nowYm; }).reduce(function (s, r) { return s + (Number(r.other_income) || 0); }, 0));
     model.allTimeMonths = sorted.filter(function (r) { return inWork(r.month.slice(0, 7)); }).length;
     return model;
   }
@@ -1952,57 +2014,60 @@
       h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Наступний період', text: '›', disabled: !m.canNext, onclick: function () { move(1); } }),
       !m.isCurrent ? h('button', { class: 'btn ghost small', type: 'button', text: 'Сьогодні', onclick: function () { S.statCursor = nowYm; render(); } }) : null,
       S.statType === 'year' ? h('button', { class: 'btn primary small', type: 'button', text: 'Рекап року', onclick: function () { openRecap(Number(m.cursor.slice(0, 4))); } }) : null);
-    var c = m.cur, ongoingNote = m.isCurrent ? h('p', { class: 'item-sub', text: 'Цей період ще триває, тому цифри неповні.' }) : null;
+    var c = m.cur, ongoingNote = m.isCurrent ? h('p', { class: 'item-sub', text: 'Цей період ще триває, тому цифри неповні' + (S.statType === 'month' ? ': ЄСВ у прибутку нараховується за весь місяць одразу, тож прибуток і ставка поки занижені.' : '.') }) : null;
     var noEsv = !(Number(S.settings.esv_quarter) > 0)
       ? h('div', { class: 'msg warn', role: 'status' }, 'ЄСВ за квартал не внесено в ', h('a', { href: '#/settings', text: 'Налаштування' }), ': податок-орієнтир занижений, а прибуток завищений.') : null;
     function kpi(label, value, sub) { return h('div', { class: 'kpi' }, h('div', { class: 'lbl', text: label }), h('div', { class: 'big-num', text: value }), sub ? h('div', { class: 'item-sub', text: sub }) : null); }
     var kpis = h('div', { class: 'kpi-grid' },
-      kpi('Дохід', money(c.income), c.payments_count + ' ' + plural(c.payments_count, 'оплата', 'оплати', 'оплат')),
-      kpi('Чистий прибуток', money(c.net_profit)),
-      kpi('Реальна ставка', fmtRate(c.hourly_rate), S.statType === 'month' ? 'за місяць вона стрибає: оплати надходять нерівномірно, точніше видно за квартал' : null),
+      kpi('Дохід від учнів', money(c.income), c.payments_count + ' ' + plural(c.payments_count, 'оплата', 'оплати', 'оплат')),
+      c.other_income > 0 ? kpi('Інший дохід (школа)', money(c.other_income)) : null,
+      kpi('Чистий прибуток', money(c.net_profit), c.other_income > 0 ? 'з усіх доходів, після витрат і податку' : null),
+      kpi('Реальна ставка', fmtRate(c.hourly_rate), S.statType === 'month' ? 'за місяць вона стрибає: оплати надходять нерівномірно, точніше видно за квартал' : (c.other_income > 0 ? 'лише за репетиторство' : null)),
       kpi('Години', fmtHours(c.hours), 'проведено ' + c.lessons_done + ', згоріло ' + c.lessons_lost + ', скасовано ' + c.lessons_cancelled));
     var bridge = h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'З чого складається прибуток' })),
       h('dl', { class: 'bridge' },
-        h('dt', { text: 'Дохід' }), h('dd', { text: money(c.income) }),
+        h('dt', { text: c.other_income > 0 ? 'Дохід від учнів' : 'Дохід' }), h('dd', { text: money(c.income) }),
+        c.other_income > 0 ? h('dt', { text: 'Інший дохід (школа)' }) : null, c.other_income > 0 ? h('dd', { text: money(c.other_income) }) : null,
         h('dt', { text: 'Витрати без податків' }), h('dd', { text: '− ' + money(c.expenses) }),
         h('dt', { text: 'Податок-орієнтир' }), h('dd', { text: '− ' + money(c.tax_estimate) }),
         h('dt', { class: 'total', text: 'Чистий прибуток' }), h('dd', { class: 'total', text: money(c.net_profit) })),
-      h('p', { class: 'hint', text: 'Податок-орієнтир за кожен місяць = дохід × ' + Number((Number(S.settings.tax_rate) * 100).toFixed(2)) + '% + ЄСВ ÷ 3. Фактично сплачені податки (' + money(c.taxes_paid) + ') від прибутку вдруге не віднімаються.' }));
+      h('p', { class: 'hint', text: 'Податок-орієнтир за кожен місяць = (дохід' + (c.other_income > 0 ? ' від учнів + інший дохід' : '') + ') × ' + Number((Number(S.settings.tax_rate) * 100).toFixed(2)) + '% + ЄСВ ÷ 3. Фактично сплачені податки (' + money(c.taxes_paid) + ') від прибутку вдруге не віднімаються.' + (c.other_income > 0 ? ' Реальна ставка рахується лише з репетиторства: ЄСВ ділиться між доходами пропорційно.' : '') }));
 
     // підсумок: найвищий і найнижчий дохід
     function monthLine(label, x) { return h('li', { class: 'item' }, h('div', { class: 'item-main' }, h('span', { text: label })), h('div', { class: 'pay-side' }, h('span', { class: 'pay-sum', text: money(x.income) }), h('div', { class: 'item-sub', text: monthYearName(x.ym) + (x.ongoing ? ', ще триває' : '') }))); }
     var summaryItems = [];
     if (S.statType === 'month') {
-      if (m.rankOf > 1) summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Цей місяць: ' + m.rank + '-й за доходом із ' + m.rankOf + ' ' + plural(m.rankOf, 'місяця', 'місяців', 'місяців') + ' роботи' })));
+      if (m.isCurrent) summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Місце цього місяця за доходом буде відоме, коли він завершиться.' })));
+      else if (m.rankOf > 1) summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Цей місяць: ' + m.rank + '-й за доходом із ' + m.rankOf + ' ' + plural(m.rankOf, 'завершеного місяця', 'завершених місяців', 'завершених місяців') + ' роботи' })));
       else summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Це перший місяць із даними.' })));
     }
-    var scope = { month: 'за весь час', quarter: 'у кварталі', year: 'за рік' }[S.statType];
+    var scope = { month: 'за весь час', quarter: 'у кварталі', year: 'за рік' }[S.statType] + ' (завершені місяці)';
     if (m.months.length > 1 && !m.allEqual) { summaryItems.push(monthLine('Найвищий дохід ' + scope, m.best)); summaryItems.push(monthLine('Найнижчий дохід ' + scope, m.worst)); }
     else if (m.months.length > 1) summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Дохід у всіх місяцях однаковий: ' + money(m.best.income) + '.' })));
-    else if (S.statType !== 'month') summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'У цьому періоді поки лише один місяць із даними: порівнювати нічого.' })));
+    else if (S.statType !== 'month') summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'У цьому періоді поки немає двох завершених місяців, тож найвищий і найнижчий ще не визначити.' })));
     if (S.statType === 'year' && m.quarters && m.quarters.length > 1 && m.bestQ.income !== m.worstQ.income) {
       summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Найкращий квартал: ' + m.bestQ.label }), h('span', { class: 'pay-sum', text: money(m.bestQ.income) })));
       summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Найнижчий квартал: ' + m.worstQ.label }), h('span', { class: 'pay-sum', text: money(m.worstQ.income) })));
     }
-    summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Дохід за весь час (' + m.allTimeMonths + ' ' + plural(m.allTimeMonths, 'місяць', 'місяці', 'місяців') + ')' }), h('span', { class: 'pay-sum', text: money(m.allTimeIncome) })));
+    summaryItems.push(h('li', { class: 'item' }, h('div', { class: 'item-main', text: 'Дохід за весь час (' + m.allTimeMonths + ' ' + plural(m.allTimeMonths, 'місяць', 'місяці', 'місяців') + ')' }), h('span', { class: 'pay-sum', text: money(m.allTimeIncome) }), m.allTimeOther > 0 ? h('div', { class: 'item-sub', text: 'і ще ' + money(m.allTimeOther) + ' інший дохід' }) : null));
     var summary = h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Підсумок' })), h('ul', { class: 'list' }, summaryItems));
 
     // порівняння з минулим періодом
     var prevWord = { month: 'минулим місяцем', quarter: 'минулим кварталом', year: 'минулим роком' }[S.statType];
-    var cmpRows = [['Дохід', 'income', money], ['Проведені заняття', 'lessons_done', function (x) { return String(x); }], ['Чистий прибуток', 'net_profit', money], ['Реальна ставка', 'hourly_rate', fmtRate]];
+    var cmpRows = [['Дохід від учнів', 'income', money], ['Проведені заняття', 'lessons_done', function (x) { return String(x); }], ['Чистий прибуток', 'net_profit', money], ['Реальна ставка', 'hourly_rate', fmtRate]];
     var cmp = h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Порівняння з ' + prevWord }), m.hasPrev ? h('span', { class: 'count', text: m.prevLabel }) : null),
       m.hasPrev ? h('div', { class: 'cmp' }, cmpRows.map(function (r) {
         return h('div', { class: 'cmp-row' }, h('div', { class: 'cmp-name', text: r[0] }), h('div', { class: 'cmp-cur', text: r[2](c[r[1]]) }),
-          h('div', { class: 'cmp-prev item-sub', text: 'було ' + r[2](m.prev[r[1]]) }), deltaCell(c[r[1]], m.prev[r[1]]));
+          h('div', { class: 'cmp-prev item-sub', text: 'було ' + r[2](m.prev[r[1]]) }), m.isCurrent ? h('span', { class: 'delta none', text: 'ще триває' }) : deltaCell(c[r[1]], m.prev[r[1]]));
       })) : h('p', { class: 'item-sub', text: 'Попереднього періоду з даними ще немає.' }),
-      m.hasPrev && m.isCurrent ? h('p', { class: 'hint', text: 'Поточний період ще не завершився: порівняння орієнтовне.' }) : null);
+      m.hasPrev && m.isCurrent ? h('p', { class: 'hint', text: 'Поточний період ще триває: відсоткову зміну покажу, коли він завершиться, бо неповний період з повним порівнювати нечесно.' }) : null);
 
     // податки
     var taxSection = m.taxes.length ? h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Податки за квартал' })),
       h('ul', { class: 'list' }, m.taxes.map(function (t) {
         return h('li', { class: 'item' },
           h('div', { class: 'item-main' }, h('div', { class: 'pay-title', text: t.label }),
-            h('div', { class: 'item-sub', text: 'Дохід ' + money(t.income) + ' × ' + Number((Number(S.settings.tax_rate) * 100).toFixed(2)) + '% = ' + money(t.incomeTax) + ', ЄСВ ' + money(t.esv) + '. Сплачено ' + money(t.paid) + '.' })),
+            h('div', { class: 'item-sub', text: 'Дохід ' + (t.other > 0 ? money(t.income) + ' від учнів + ' + money(t.other) + ' інший = ' + money(t.income + t.other) : money(t.income)) + ' × ' + Number((Number(S.settings.tax_rate) * 100).toFixed(2)) + '% = ' + money(t.incomeTax) + ', ЄСВ ' + money(t.esv) + '. Сплачено ' + money(t.paid) + '.' })),
           h('div', { class: 'pay-side' }, h('div', { class: 'pay-sum', text: money(t.tax) }), h('div', { class: 'item-sub', text: t.over > 0 ? 'сплачено більше на ' + money(t.over) : 'лишилось ' + money(t.left) })));
       })), h('p', { class: 'hint', text: 'Це орієнтир, а не розрахунок для декларації. Відкласти за квартал = дохід × ставка + ЄСВ за квартал.' })) : null;
 
@@ -2157,7 +2222,8 @@
 
     var incLines = [];
     if (sm.months.length > 1 && sm.best && sm.best.income > 0) incLines.push('Найкращий місяць: ' + monthName(sm.best.ym) + ', ' + money(sm.best.income));
-    cards.push({ key: 'income', lead: 'Отримано за рік', big: money(c.income), count: { value: c.income, fmt: 'money' }, lines: incLines });
+    if (c.other_income > 0) incLines.push('Окремо інший дохід: ' + money(c.other_income));
+    cards.push({ key: 'income', lead: 'Отримано від учнів за рік', big: money(c.income), count: { value: c.income, fmt: 'money' }, lines: incLines });
 
     // учні
     var perStudent = tallyKey(done, function (x) { return x.l.student_id; });
@@ -2191,7 +2257,7 @@
     var sent = done.filter(function (x) { return !x.l.imported && x.l.homework_sent; }).length, checked = done.filter(function (x) { return !x.l.imported && x.l.homework_checked; }).length;
     if (sent > 0) cards.push({ key: 'homework', lead: 'Домашні завдання', big: String(sent), count: { value: sent, fmt: 'int' }, unit: 'надіслано', lines: ['Перевірено: ' + checked] });
 
-    var pLines = ['Реальна ставка: ' + fmtRate(c.hourly_rate), 'Після витрат і податку-орієнтиру'];
+    var pLines = ['Реальна ставка' + (c.other_income > 0 ? ' (лише репетиторство)' : '') + ': ' + fmtRate(c.hourly_rate), 'Після витрат і податку-орієнтиру' + (c.other_income > 0 ? ', з усіх доходів' : '')];
     if (!(Number(a.cfg && a.cfg.esv_quarter) > 0)) pLines.push('ЄСВ не внесено в Налаштування, тому прибуток завищений');
     cards.push({ key: 'profit', lead: 'Чистий прибуток', big: money(c.net_profit), count: { value: c.net_profit, fmt: 'money' }, lines: pLines });
 
@@ -2398,10 +2464,11 @@
   function renderPayments() {
     var p = buildPayments(S);
     var children = [h('div', { class: 'section-head' }, h('h2', { text: 'Оплати' }))];
-    if (!p.debt.length && !p.soon.length) {
+    if (!p.debt.length && !p.now.length && !p.soon.length) {
       children.push(h('p', { class: 'item-sub', text: 'Усі учні з оплаченими заняттями.' }));
     } else {
       if (p.debt.length) children.push(h('div', { class: 'debt-box' }, h('p', { class: 'sub-title', text: 'У боргу' }), h('ul', { class: 'list' }, p.debt.map(function (b) { return payItem(b, true); }))));
+      if (p.now.length) children.push(h('p', { class: 'sub-title', text: 'Потрібна оплата' }), h('ul', { class: 'list' }, p.now.map(function (b) { return payItem(b, false); })));
       if (p.soon.length) children.push(h('p', { class: 'sub-title', text: 'Скоро оплата' }), h('ul', { class: 'list' }, p.soon.map(function (b) { return payItem(b, false); })));
     }
     return h('section', { class: 'section' }, children);
