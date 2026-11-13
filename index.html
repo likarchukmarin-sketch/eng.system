@@ -225,6 +225,9 @@
   .stat .big-num { display: block; font-size: 1.8rem; line-height: 1.2; }
   .stat .lbl { color: var(--muted); }
   .space-top { margin-top: 16px; }
+  .sql-area { min-height: 220px; font: 13px/1.4 ui-monospace, Consolas, monospace; }
+  .restore-table { width: 100%; border-collapse: collapse; } .restore-table td { padding: 6px 4px; border-top: 1px solid var(--line); } .restore-table td:last-child { text-align: right; }
+  .check-row { display: flex; gap: 10px; align-items: flex-start; } .check-row input { width: 22px; height: 22px; margin-top: 2px; flex: none; accent-color: var(--green); }
 
   /* ---------- статистика ---------- */
   .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 24px 32px; margin: 8px 0 40px; }
@@ -296,6 +299,7 @@
   .summary { margin-top: 56px; padding: 16px 20px; background: var(--surface-2); border-radius: 16px; display: flex; flex-wrap: wrap; gap: 6px 28px; align-items: baseline; }
   .summary .big { font-family: var(--serif); font-size: 1.8rem; font-weight: 600; font-variant-numeric: lining-nums; }
   .summary .lbl { color: var(--muted); margin-left: 6px; }
+  .summary .note-small { font-size: .84rem; margin-left: 10px; white-space: nowrap; }
 
   /* ---------- вхід та екрани-повідомлення ---------- */
   .center { max-width: 460px; margin: 12vh auto 0; padding: 0 20px; }
@@ -515,7 +519,7 @@
   }
 
   // для перевірок у тестах
-  window.CRM_LOGIC = { kyivWallToUtc: kyivWallToUtc, kyivDateStr: kyivDateStr, dayRange: dayRange, daysToBirthday: daysToBirthday, balanceText: balanceText, plural: plural, kyivWallString: kyivWallString, parseWallString: parseWallString, buildTasks: buildTasks, buildPayments: buildPayments, fmtTime: fmtTime, statsModel: statsModel, aggMonths: aggMonths, compact: compact, pctChange: pctChange, summaryTarget: summaryTarget, recapModel: recapModel, maskName: maskName, recapOfferYear: recapOfferYear };
+  window.CRM_LOGIC = { kyivWallToUtc: kyivWallToUtc, kyivDateStr: kyivDateStr, dayRange: dayRange, daysToBirthday: daysToBirthday, balanceText: balanceText, plural: plural, kyivWallString: kyivWallString, parseWallString: parseWallString, buildTasks: buildTasks, buildPayments: buildPayments, fmtTime: fmtTime, statsModel: statsModel, aggMonths: aggMonths, compact: compact, pctChange: pctChange, summaryTarget: summaryTarget, buildRestoreSql: buildRestoreSql, recapModel: recapModel, maskName: maskName, recapOfferYear: recapOfferYear };
 
   // ================= DOM-помічники (весь текст — лише textContent) =================
   function h(tag, props) {
@@ -1843,8 +1847,8 @@
       h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Резервна копія' })),
         h('p', { class: 'item-sub', text: last ? 'Остання копія: ' + last + '.' : 'Копій ще не було.' }),
         h('p', { class: 'hint', text: 'Файл містить дані учнів і оплат. Не клади його в публічні місця, зокрема в репозиторій на GitHub.' }),
-        h('div', { class: 'slot-actions space-top' }, actButton('ghost', 'Зберегти резервну копію', saveBackup)),
-        h('p', { class: 'hint space-top' }, 'Якщо базу колись треба відновити: ', h('a', { href: 'restore.html', target: '_blank', rel: 'noopener', text: 'сторінка відновлення з копії' }), '. Вона нічого нікуди не надсилає, лише готує SQL з файлу копії.')));
+        h('div', { class: 'slot-actions space-top' }, actButton('ghost', 'Зберегти резервну копію', saveBackup), h('button', { class: 'btn ghost', type: 'button', text: 'Відновити з копії…', onclick: openRestoreDialog })),
+        h('p', { class: 'hint space-top', text: 'Відновлення нічого не змінює саме: воно готує SQL, який ти запускаєш у Supabase. Якщо база порожня й CRM не відкривається, є окрема сторінка restore.html: її можна відкрити просто з комп’ютера подвійним кліком, завантажувати на GitHub для цього не потрібно.' })));
   }
 
   // ================= Крок 6: статистика =================
@@ -2354,6 +2358,125 @@
     return root;
   }
 
+  // ================= Відновлення з копії (те саме, що в restore.html, щоб не залежати від окремого файлу) =================
+  var RESTORE_TABLES = ['students', 'packages', 'payments', 'lessons', 'expenses', 'tasks', 'tax_deadlines', 'monthly_summaries', 'other_income'];
+  var RESTORE_LABELS = { settings: 'Налаштування', students: 'Учні', packages: 'Пакети занять', payments: 'Оплати', lessons: 'Заняття', expenses: 'Витрати', tasks: 'Завдання', tax_deadlines: 'Дати податків', monthly_summaries: 'Підсумки місяців', other_income: 'Інший дохід' };
+  var RESTORE_SKIP = { packages: ['price_per_lesson'] };   // обчислювана колонка: база сама її рахує
+  function restoreLit(v) {
+    if (v === null || v === undefined) return 'null';
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    if (typeof v === 'number') { if (!isFinite(v)) throw new Error('Некоректне число у файлі'); return String(v); }
+    if (typeof v === 'object') return "'" + JSON.stringify(v).replace(/'/g, "''") + "'::jsonb";
+    return "'" + String(v).replace(/'/g, "''") + "'";
+  }
+  function restoreIdent(c) { if (!/^[a-z_][a-z0-9_]*$/.test(c)) throw new Error('Підозріла назва колонки у файлі: ' + c); return c; }
+  function restoreCols(table, rows) {
+    var skip = RESTORE_SKIP[table] || [], set = {};
+    rows.forEach(function (r) { Object.keys(r).forEach(function (k) { if (skip.indexOf(k) === -1) set[k] = 1; }); });
+    return Object.keys(set).map(restoreIdent);
+  }
+  function buildRestoreSql(backup, opts) {
+    opts = opts || {};
+    if (!backup || backup.app !== 'my-crm' || !backup.tables || typeof backup.tables !== 'object') throw new Error('Це не файл резервної копії цього CRM.');
+    var t = backup.tables, out = [], counts = {};
+    out.push('-- Відновлення з резервної копії ' + (backup.created_at || '') + '.');
+    out.push('-- Усе виконується однією транзакцією: якщо щось не збігається, нічого не збережеться.');
+    out.push('begin;');
+    if (opts.truncate) {
+      out.push('\n-- Видалення поточних даних (налаштування лишаються)');
+      out.push('truncate table ' + ['monthly_summaries', 'tasks', 'expenses', 'lessons', 'payments', 'packages', 'students', 'tax_deadlines', 'other_income'].map(function (x) { return 'public.' + x; }).join(', ') + ';');
+    }
+    var st = (t.settings || [])[0];
+    if (st) {
+      var sets = Object.keys(st).filter(function (k) { return k !== 'id'; }).map(function (k) { return restoreIdent(k) + ' = ' + restoreLit(st[k]); });
+      if (sets.length) { out.push('\n-- Налаштування'); out.push('update public.settings set ' + sets.join(', ') + ' where id = 1;'); }
+    }
+    var links = [];
+    RESTORE_TABLES.forEach(function (name) {
+      var rows = t[name];
+      if (!Array.isArray(rows)) return;
+      counts[name] = rows.length;
+      if (!rows.length) return;
+      var c = restoreCols(name, rows);
+      out.push('\n-- ' + RESTORE_LABELS[name] + ' (' + rows.length + ')');
+      for (var i = 0; i < rows.length; i += 150) {
+        var part = rows.slice(i, i + 150).map(function (r) {
+          var rr = r;
+          if (name === 'lessons' && r.rescheduled_to) { links.push([r.id, r.rescheduled_to]); rr = Object.assign({}, r, { rescheduled_to: null }); }   // посилання між заняттями додамо другим кроком
+          return '  (' + c.map(function (k) { return restoreLit(rr[k]); }).join(', ') + ')';
+        });
+        out.push('insert into public.' + name + ' (' + c.join(', ') + ') values\n' + part.join(',\n') + ';');
+      }
+    });
+    if (links.length) {
+      out.push('\n-- Звʼязки «перенесено на» між заняттями');
+      links.forEach(function (l) { out.push('update public.lessons set rescheduled_to = ' + restoreLit(l[1]) + ' where id = ' + restoreLit(l[0]) + ';'); });
+    }
+    var checks = Object.keys(counts).map(function (n) { return '(select count(*) from public.' + n + ') = ' + counts[n]; });
+    out.push('\n-- Перевірка: кількість рядків у кожній таблиці має збігатися з файлом');
+    out.push('do $$ begin\n  if not (' + checks.join('\n      and ') + ') then\n    raise exception \'Кількості рядків не збігаються з файлом копії. Нічого не збережено.\';\n  end if;\nend $$;');
+    out.push('\ncommit;');
+    return { sql: out.join('\n') + '\n', counts: counts, created_at: backup.created_at || null };
+  }
+
+  function openRestoreDialog() {
+    var parsed = null, lastSql = '';
+    var err = errBox(), summary = h('div', { hidden: true }), result = h('div', { class: 'stack', hidden: true });
+    var file = h('input', { type: 'file', accept: '.json,application/json' });
+    var trunc = h('input', { type: 'checkbox', class: 'check' });
+    var truncWarn = h('p', { class: 'note bad', hidden: true, text: 'Усіх учнів, оплати, заняття, витрати, завдання, дати податків, підсумки місяців і інший дохід у базі буде видалено перед відновленням. Роби це лише якщо впевнена, що файл копії актуальний.' });
+    var options = h('div', { class: 'stack', hidden: true });
+    var area = h('textarea', { readonly: true, 'aria-label': 'Згенерований SQL', class: 'sql-area' });
+    var info = h('p', { class: 'item-sub' });
+    var build = h('button', { class: 'btn primary', type: 'button', text: 'Підготувати SQL' });
+    var copy = h('button', { class: 'btn ghost', type: 'button', text: 'Скопіювати' });
+    var down = h('button', { class: 'btn ghost', type: 'button', text: 'Завантажити як .sql' });
+    function reset(msg) { err.textContent = msg; err.hidden = !msg; summary.hidden = true; options.hidden = true; result.hidden = true; parsed = null; }
+    file.addEventListener('change', function () {
+      var f = file.files && file.files[0];
+      err.hidden = true; result.hidden = true;
+      if (!f) return;
+      var fr = new FileReader();
+      fr.onerror = function () { reset('Не вдалося прочитати файл.'); };
+      fr.onload = function () {
+        var data;
+        try { data = JSON.parse(fr.result); } catch (e) { reset('Файл пошкоджений або це не файл копії: не вдалося його прочитати.'); return; }
+        if (!data || data.app !== 'my-crm' || !data.tables) { reset('Це не файл резервної копії цього CRM.'); return; }
+        parsed = data;
+        var rows = ['settings'].concat(RESTORE_TABLES).filter(function (n) { return Array.isArray(data.tables[n]); }).map(function (n) { return h('tr', {}, h('td', { text: RESTORE_LABELS[n] }), h('td', { text: String(data.tables[n].length) })); });
+        var when = data.created_at ? new Date(data.created_at).toLocaleString('uk-UA') : 'невідомо';
+        summary.replaceChildren(h('p', { class: 'note', text: 'Копію прочитано. Створена: ' + when }), h('table', { class: 'restore-table' }, h('tbody', {}, rows)));
+        summary.hidden = false; options.hidden = false;
+      };
+      fr.readAsText(f);
+    });
+    trunc.addEventListener('change', function () { truncWarn.hidden = !trunc.checked; });
+    build.addEventListener('click', function () {
+      if (!parsed) return;
+      try {
+        var r = buildRestoreSql(parsed, { truncate: trunc.checked });
+        lastSql = r.sql; area.value = r.sql;
+        var total = Object.keys(r.counts).reduce(function (s, k) { return s + r.counts[k]; }, 0);
+        info.textContent = 'Рядків для відновлення: ' + total + '. ' + (trunc.checked ? 'Поточні дані буде спершу видалено.' : 'Поточні дані не видаляються.') + ' Встав це в Supabase: SQL Editor, New query, Run.';
+        result.hidden = false; area.focus(); area.select();
+      } catch (e) { reset(e.message || 'Не вдалося підготувати SQL.'); }
+    });
+    copy.addEventListener('click', function () {
+      function done() { copy.textContent = 'Скопійовано'; setTimeout(function () { copy.textContent = 'Скопіювати'; }, 2000); }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(lastSql).then(done, function () { area.select(); document.execCommand('copy'); done(); });
+      else { area.select(); document.execCommand('copy'); done(); }
+    });
+    down.addEventListener('click', function () {
+      var a = document.createElement('a'), url = URL.createObjectURL(new Blob([lastSql], { type: 'application/sql' }));
+      a.href = url; a.download = 'crm-restore.sql'; document.body.append(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    });
+    options.append(h('label', { class: 'check-row' }, trunc, h('span', {}, h('b', { text: 'Спершу видалити поточні дані' }), h('br'), h('span', { class: 'item-sub', text: 'Увімкни, якщо відновлюєш у базу, де вже є записи (наприклад, після збою). Налаштування не видаляються. Без цього скрипт зупиниться, якщо знайде такі самі записи.' }))), truncWarn, h('div', { class: 'slot-actions' }, build));
+    result.append(info, h('div', { class: 'slot-actions' }, copy, down), area, h('p', { class: 'hint', text: 'Файл містить персональні дані учнів. Не клади його в публічні місця, зокрема в репозиторій на GitHub.' }));
+    openModal('Відновлення з копії', 'Нічого нікуди не надсилається: файл читається у твоєму браузері й перетворюється на SQL.',
+      h('div', { class: 'stack' }, h('p', { class: 'note late', text: 'Це лише готує SQL. База зміниться, тільки коли ти сама запустиш його в Supabase.' }), err, field('Файл копії (crm-backup-дата.json)', file), summary, options, result), { wide: true });
+  }
+
   // ================= Малювання =================
   var STATUS = {
     done: { label: 'Проведено', cls: 'ok', ic: 'check' },
@@ -2488,10 +2611,11 @@
 
   function renderSummary() {
     var m = S.month || {};
-    var income = Number(m.income) || 0, done = Number(m.lessons_done) || 0;
+    var income = Number(m.income) || 0, other = Number(m.other_income) || 0, done = Number(m.lessons_done) || 0;
     var monthName = new Intl.DateTimeFormat('uk-UA', { timeZone: TZ, month: 'long' }).format(new Date());
     return h('div', { class: 'summary', role: 'region', 'aria-label': 'Підсумок місяця' },
-      h('span', {}, h('span', { class: 'big', text: money(income) }), h('span', { class: 'lbl', text: 'дохід, ' + monthName })),
+      h('span', {}, h('span', { class: 'big', text: money(income) }), h('span', { class: 'lbl', text: 'дохід від учнів, ' + monthName }),
+        other > 0 ? h('span', { class: 'lbl note-small', text: '(разом зі школою: ' + money(income + other) + ')' }) : null),
       h('span', {}, h('span', { class: 'big', text: String(done) }), h('span', { class: 'lbl', text: plural(done, 'проведене заняття', 'проведені заняття', 'проведених занять') })));
   }
 
