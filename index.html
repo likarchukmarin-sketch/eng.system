@@ -278,6 +278,8 @@
   .recap-big.text { font-size: clamp(3rem, 14vw, 5.6rem); line-height: 1.05; }
   .recap-unit { font-family: var(--serif); font-size: 2rem; font-weight: 600; margin: 8px 0 0; }
   .recap-line { font-size: 1.12rem; margin: 10px 0 0; color: var(--ink); }
+  .recap-reveal { margin-top: 14px; }
+  .recap-reveal .recap-line { font-size: .98rem; color: var(--muted); }
   .recap-figs { display: grid; grid-template-columns: 1fr 1fr; gap: 22px 18px; margin: 10px 0 18px; }
   .recap-fig-val { font-family: var(--serif); font-size: clamp(2rem, 9vw, 3rem); font-weight: 600; line-height: 1.1; color: var(--green-deep); font-variant-numeric: lining-nums; }
   .recap-fig-lbl { color: var(--muted); }
@@ -880,10 +882,11 @@
       if (rows.length) pkgs = must(await sb.from('packages').select('*').in('id', rows.map(function (x) { return x.package_id; }))) || [];
       var oth = await sb.from('other_income').select('*').gte('received_at', first).lt('received_at', nextFirst).order('received_at', { ascending: false });
       var othRows = oth.error ? [] : (oth.data || []);
+      var sch = await sb.from('school_lessons').select('*').eq('month', first).maybeSingle();
       if (S.route !== route || S.payMonth !== month) return;
       var pkgMap = {};
       pkgs.forEach(function (x) { pkgMap[x.id] = x; });
-      S.payData = { month: month, rows: rows, pkgMap: pkgMap, other: othRows };
+      S.payData = { month: month, rows: rows, pkgMap: pkgMap, other: othRows, school: sch.error ? null : (sch.data || null), schoolMissing: !!sch.error };
     } else if (route.name === 'schedule') {
       var wk = S.schedWeek, a = wk.split('-').map(Number);
       var e = addDaysStr(wk, 7).split('-').map(Number);
@@ -902,12 +905,13 @@
     } else if (route.name === 'settings') {
       var r2 = await Promise.all([
         sb.from('tax_deadlines').select('*').order('due_date', { ascending: true }),
-        sb.from('expenses').select('*').gte('series_index', 0)
+        sb.from('expenses').select('*').gte('series_index', 0),
+        sb.from('esv_rates').select('*').order('year', { ascending: true })
       ]);
       var dl = must(r2[0]) || [];
       if (r2[1].error) throw r2[1].error;
       if (S.route !== route) return;
-      S.setData = { deadlines: dl, series: r2[1].data || [] };
+      S.setData = { deadlines: dl, series: r2[1].data || [], esvRates: r2[2].error ? [] : (r2[2].data || []), esvMissing: !!r2[2].error };
     } else if (route.name === 'summaries') {
       var sm = S.sumMonth, rg2 = monthRangeUtc(sm);
       var r4 = await Promise.all([
@@ -1343,6 +1347,38 @@
         del, h('button', { class: 'btn ghost', type: 'button', text: 'Не видаляти', onclick: function () { close(); } })));
   }
 
+  // ---------- уроки в школі: одне число на місяць ----------
+  var MIGRATION13 = 'Спершу запусти файл 13_school_esv.sql у Supabase.';
+  function openSchoolLessonsForm(o) {
+    o = o || {};
+    var edit = o.edit || null, err = errBox();
+    var month = h('input', { type: 'month', 'aria-label': 'Місяць' }); month.value = o.month || todayStr().slice(0, 7);
+    var count = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'off', placeholder: 'Наприклад: 48', 'aria-label': 'Кількість уроків' }); count.value = edit ? String(edit.lessons) : '';
+    var close;
+    var save = actButton('primary', 'Зберегти', async function () {
+      err.hidden = true;
+      if (!/^\d{4}-\d{2}$/.test(month.value)) { showErr(err, 'Вкажи місяць.'); month.focus(); return; }
+      var v = count.value.trim();
+      if (!/^\d+$/.test(v) || Number(v) > 600) { showErr(err, 'Кількість уроків: ціле число від 0 до 600.'); count.focus(); return; }
+      var res = await sb.from('school_lessons').upsert({ month: month.value + '-01', lessons: Number(v) }, { onConflict: 'month' });
+      if (res.error) { if (/school_lessons/.test(res.error.message || '') || res.error.code === '42P01') { showErr(err, MIGRATION13); return; } throw res.error; }
+      close();
+      if (S.route.name === 'payments') { S.payMonth = month.value; S.payData = null; }
+      await refresh({ silent: true });
+      toast('Кількість уроків збережено.');
+    });
+    var buttons = [save];
+    if (edit) buttons.push(actButton('link', 'Прибрати запис', async function () {
+      must(await sb.from('school_lessons').delete().eq('month', edit.month));
+      close(); await refresh({ silent: true }); toast('Запис прибрано.');
+    }));
+    buttons.push(h('button', { class: 'btn ghost', type: 'button', text: 'Скасувати', onclick: function () { close(); } }));
+    close = openModal('Уроки в школі', 'Скільки уроків ти провела в школі за місяць (одне число, не по учнях).',
+      h('div', { class: 'stack' }, err, h('div', { class: 'form-grid' }, field('Місяць', month), field('Кількість уроків', count)),
+        h('p', { class: 'hint', text: 'Йде в «Статистику» й рекап (уроки та години), не впливає на баланси учнів і податок. Якщо місяць уже є, число буде замінено.' }),
+        h('div', { class: 'slot-actions' }, buttons)), { wide: true });
+  }
+
   // ---------- розділ «Оплати» ----------
   function shiftMonth(ym, delta) {
     var p = ym.split('-').map(Number);
@@ -1372,7 +1408,13 @@
             h('button', { class: 'btn ghost small', type: 'button', text: 'Додати інший дохід', onclick: function () { openOtherIncomeForm({}); } })),
           other.length ? [h('p', { class: 'month-total' }, h('span', { class: 'big-num', text: money(otherTotal) }), h('span', { class: 'lbl', text: 'зі школи та інше, надходжень: ' + other.length })),
             h('ul', { class: 'list' }, other.map(otherIncomeRow))]
-          : h('p', { class: 'item-sub', text: 'Надходжень зі школи цього місяця немає. Вони входять у податок-орієнтир, але не в заняття й години.' }))
+          : h('p', { class: 'item-sub', text: 'Надходжень зі школи цього місяця немає. Вони входять у податок-орієнтир, але не в заняття й години.' })),
+        h('section', { class: 'section space-top' },
+          h('div', { class: 'section-head' }, h('h2', { text: 'Уроки в школі' }),
+            S.payData.schoolMissing ? null : h('button', { class: 'btn ghost small', type: 'button', text: S.payData.school ? 'Змінити' : 'Вказати кількість', onclick: function () { openSchoolLessonsForm({ month: S.payMonth, edit: S.payData.school }); } })),
+          S.payData.schoolMissing ? h('div', { class: 'msg err', role: 'alert', text: MIGRATION13 })
+          : S.payData.school ? h('p', { class: 'month-total' }, h('span', { class: 'big-num', text: String(S.payData.school.lessons) }), h('span', { class: 'lbl', text: 'уроків у школі за місяць' + (S.settings && S.settings.school_lesson_min ? ', ≈ ' + fmtHours(S.payData.school.lessons * S.settings.school_lesson_min / 60) : '') }))
+          : h('p', { class: 'item-sub', text: 'Кількість уроків у школі за цей місяць ще не вказана. Вона йде в «Статистику» й рекап, не в податок.' }))
       ];
     }
     return page(
@@ -1599,11 +1641,15 @@
   }
 
   // ---------- резервна копія ----------
-  var BACKUP_TABLES = ['settings', 'students', 'packages', 'payments', 'lessons', 'expenses', 'tasks', 'tax_deadlines', 'monthly_summaries', 'other_income'];
+  var BACKUP_TABLES = ['settings', 'students', 'packages', 'payments', 'lessons', 'expenses', 'tasks', 'tax_deadlines', 'monthly_summaries', 'other_income', 'school_lessons', 'esv_rates'];
+  // таблиці з файлу 13: ключ сортування й дозвіл пропустити таблицю, якщо файл 13 ще не запущено
+  var BACKUP_KEY = { school_lessons: 'month', esv_rates: 'year' };
   async function fetchAllRows(table) {
-    var out = [], from = 0, size = 1000;
+    var out = [], from = 0, size = 1000, key = BACKUP_KEY[table] || 'id';
     for (;;) {
-      var page = must(await sb.from(table).select('*').order('id', { ascending: true }).range(from, from + size - 1)) || [];
+      var res = await sb.from(table).select('*').order(key, { ascending: true }).range(from, from + size - 1);
+      if (res.error && BACKUP_KEY[table]) return [];
+      var page = must(res) || [];
       out = out.concat(page);
       if (page.length < size) return out;
       from += size;
@@ -1752,6 +1798,44 @@
         go, h('button', { class: 'btn ghost', type: 'button', text: 'Лишити', onclick: function () { close(); } })));
   }
 
+  // зміна наявної дати податків: дата, тип і примітка
+  function openDeadlineForm(x) {
+    var err = errBox(), close;
+    var date = h('input', { type: 'date', 'aria-label': 'Дата' }); date.value = x.due_date;
+    var kind = sel([['payment', 'Сплата податків'], ['declaration', 'Подача декларації']], x.kind); kind.setAttribute('aria-label', 'Тип');
+    var note = h('input', { type: 'text', maxlength: '120', placeholder: 'Примітка', 'aria-label': 'Примітка', autocomplete: 'off' }); note.value = x.note || '';
+    var save = actButton('primary', 'Зберегти', async function () {
+      err.hidden = true;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date.value)) { showErr(err, 'Вкажи дату.'); date.focus(); return; }
+      must(await sb.from('tax_deadlines').update({ due_date: date.value, kind: kind.value, note: note.value.trim() || null }).eq('id', x.id));
+      close(); await refresh({ silent: true }); toast('Дату змінено.');
+    });
+    close = openModal('Змінити дату податків', null,
+      h('div', { class: 'stack' }, err, h('div', { class: 'form-grid' }, field('Дата', date), field('Тип', kind)), field('Примітка', note),
+        h('div', { class: 'slot-actions' }, save, h('button', { class: 'btn ghost', type: 'button', text: 'Скасувати', onclick: function () { close(); } }))));
+  }
+
+  // ЄСВ для конкретного року: сума на місяць і з якого місяця платиться
+  function openEsvRateForm(x) {
+    var err = errBox(), close;
+    var year = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'off', placeholder: 'Наприклад: 2025', 'aria-label': 'Рік' }); year.value = x ? String(x.year) : '';
+    if (x) year.readOnly = true;
+    var monthly = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: 'Наприклад: 1760', 'aria-label': 'ЄСВ за місяць' }); monthly.value = x ? String(Number(x.monthly)) : '';
+    var first = sel(Array.from({ length: 12 }, function (_, i) { return [String(i + 1), monthName('2000-' + pad(i + 1))]; }), String(x ? x.first_month : 1)); first.setAttribute('aria-label', 'З якого місяця');
+    var save = actButton('primary', 'Зберегти', async function () {
+      err.hidden = true;
+      if (!/^\d{4}$/.test(year.value.trim()) || Number(year.value) < 2020 || Number(year.value) > 2100) { showErr(err, 'Рік: чотири цифри, наприклад 2025.'); year.focus(); return; }
+      var m = parseMoney(monthly.value);
+      if (isNaN(m) || m < 0) { showErr(err, 'ЄСВ за місяць: сума в гривнях, наприклад 1760.'); monthly.focus(); return; }
+      var res = await sb.from('esv_rates').upsert({ year: Number(year.value), monthly: m, first_month: Number(first.value) }, { onConflict: 'year' });
+      if (res.error) { if (/esv_rates/.test(res.error.message || '') || res.error.code === '42P01') { showErr(err, MIGRATION13); return; } throw res.error; }
+      close(); await refresh({ silent: true }); toast('ЄСВ для ' + year.value + ' року збережено.');
+    });
+    close = openModal(x ? 'ЄСВ за ' + x.year + ' рік' : 'ЄСВ для року', 'Для цього року податок-орієнтир братиме цю суму за кожен місяць замість «ЄСВ за квартал» з правил.',
+      h('div', { class: 'stack' }, err, h('div', { class: 'form-grid' }, field('Рік', year), field('ЄСВ за місяць, грн', monthly)), field('Платиться з місяця', first, 'До цього місяця ЄСВ = 0 (наприклад, ФОП відкрито в лютому: вибери лютий).'),
+        h('div', { class: 'slot-actions' }, save, h('button', { class: 'btn ghost', type: 'button', text: 'Скасувати', onclick: function () { close(); } }))), { wide: true });
+  }
+
   function renderSettingsPage() {
     var st = S.settings;
     var err = errBox();
@@ -1770,7 +1854,9 @@
         field('За скільки днів нагадувати про податки', num('remind', st.tax_remind_days))),
       h('div', { class: 'form-grid' },
         field('Ставка податку, %', num('rate', pct), '5% єдиний податок + 1% військовий збір = 6.'),
-        field('ЄСВ за квартал, грн', num('esv', st.esv_quarter == null ? '' : Number(st.esv_quarter)), 'Входить у податок-орієнтир у статистиці.')));
+        field('ЄСВ за квартал, грн', num('esv', st.esv_quarter == null ? '' : Number(st.esv_quarter)), 'Входить у податок-орієнтир. Для минулих років з іншим ЄСВ є блок «ЄСВ по роках» нижче.')),
+      st.school_lesson_min !== undefined ? h('div', { class: 'form-grid' },
+        field('Тривалість уроку в школі, хв', num('schoolmin', st.school_lesson_min), 'Для годин школи в статистиці. Реальна ставка рахується лише з репетиторства.')) : null);
     var save = actButton('primary', 'Зберегти налаштування', async function () {
       err.hidden = true;
       function int(key, min, max, name, optional) {
@@ -1790,7 +1876,9 @@
       var esvStr = inputs.esv.value.trim();
       var esv = esvStr ? parseMoney(esvStr) : null;
       if (esvStr && isNaN(esv)) { showErr(err, 'ЄСВ: сума в гривнях, наприклад 5000, або порожньо.'); inputs.esv.focus(); return; }
-      must(await sb.from('settings').update({ late_cancel_hours: late, reschedule_limit: limit, soon_pay_threshold: soon, default_duration_min: dur, schedule_horizon_weeks: weeks, tax_remind_days: remind, tax_rate: Number((Number(rateStr) / 100).toFixed(4)), esv_quarter: esv }).eq('id', 1));
+      var upd = { late_cancel_hours: late, reschedule_limit: limit, soon_pay_threshold: soon, default_duration_min: dur, schedule_horizon_weeks: weeks, tax_remind_days: remind, tax_rate: Number((Number(rateStr) / 100).toFixed(4)), esv_quarter: esv };
+      if (inputs.schoolmin) { var sm = int('schoolmin', 10, 240, 'Тривалість уроку в школі'); if (sm === undefined) return; upd.school_lesson_min = sm; }
+      must(await sb.from('settings').update(upd).eq('id', 1));
       await refresh({ silent: true });
       toast('Налаштування збережено.');
     });
@@ -1815,9 +1903,23 @@
           return h('li', { class: 'item' },
             h('div', { class: 'item-main' }, h('div', { class: past ? 'item-sub' : 'pay-title', text: (x.kind === 'declaration' ? 'Подати декларацію' : 'Сплатити податки') + ', ' + fmtDMY(x.due_date) }),
               x.note || past ? h('div', { class: 'item-sub', text: [past ? 'минула' : null, x.note].filter(Boolean).join(', ') }) : null),
-            actButton('link', 'Видалити', async function () { must(await sb.from('tax_deadlines').delete().eq('id', x.id)); await refresh({ silent: true }); }));
+            h('div', { class: 'item-actions' },
+              h('button', { class: 'btn link', type: 'button', text: 'Змінити', onclick: function () { openDeadlineForm(x); } }),
+              actButton('link', 'Видалити', async function () { must(await sb.from('tax_deadlines').delete().eq('id', x.id)); await refresh({ silent: true }); })));
         }))
       : h('p', { class: 'item-sub', text: 'Дат ще немає. З них береться нагадування «Сплатити податки» на Головній.' });
+
+    // ЄСВ по роках
+    var eList = !d ? h('p', { class: 'skeleton', text: 'Завантаження…' }) : d.esvMissing ? h('div', { class: 'msg err', role: 'alert', text: MIGRATION13 })
+      : d.esvRates.length ? h('ul', { class: 'list' }, d.esvRates.map(function (x) {
+          return h('li', { class: 'item' },
+            h('div', { class: 'item-main' }, h('div', { class: 'pay-title', text: x.year + ' рік: ' + money(x.monthly) + ' на місяць' }),
+              h('div', { class: 'item-sub', text: x.first_month > 1 ? 'платиться з місяця: ' + monthName('2000-' + pad(x.first_month)) + ', раніше ЄСВ = 0' : 'за всі 12 місяців' })),
+            h('div', { class: 'item-actions' },
+              h('button', { class: 'btn link', type: 'button', text: 'Змінити', onclick: function () { openEsvRateForm(x); } }),
+              actButton('link', 'Видалити', async function () { must(await sb.from('esv_rates').delete().eq('year', x.year)); await refresh({ silent: true }); })));
+        }))
+      : h('p', { class: 'item-sub', text: 'Окремих років немає: для всіх місяців діє «ЄСВ за квартал» з правил, поділений на 3.' });
 
     // регулярні витрати
     var seriesRows = [];
@@ -1842,6 +1944,9 @@
       h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Правила' })), form, h('div', { class: 'slot-actions space-top' }, save)),
       h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Дати податків' })), dList,
         h('div', { class: 'stack space-top' }, dErr, h('div', { class: 'form-grid' }, dDate, dKind), dNote, h('div', { class: 'slot-actions' }, dAdd))),
+      h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'ЄСВ по роках' }),
+        d && !d.esvMissing ? h('button', { class: 'btn ghost small', type: 'button', text: 'Додати рік', onclick: function () { openEsvRateForm(null); } }) : null), eList,
+        h('p', { class: 'hint', text: 'Для років, яких тут немає (зокрема поточного), діє «ЄСВ за квартал» з правил, поділений на 3 місяці.' })),
       h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Регулярні витрати' })), sList,
         S.recurringError ? h('div', { class: 'msg err', text: MIGRATION7 }) : null),
       h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Резервна копія' })),
@@ -1878,7 +1983,7 @@
   }
   function roundAway(x) { return x < 0 ? -Math.round(-x) : Math.round(x); }
   function round2(x) { return roundAway(x * 100) / 100; }
-  var AGG_KEYS = ['income', 'other_income', 'payments_count', 'lessons_done', 'lessons_lost', 'lessons_cancelled', 'hours', 'expenses', 'taxes_paid', 'tax_estimate', 'net_profit', 'tutor_net'];
+  var AGG_KEYS = ['income', 'other_income', 'payments_count', 'lessons_done', 'lessons_lost', 'lessons_cancelled', 'hours', 'expenses', 'taxes_paid', 'tax_estimate', 'net_profit', 'tutor_net', 'school_lessons', 'school_hours', 'esv'];
   // та сама арифметика, що у виглядах stats_quarter / stats_year у базі
   function aggMonths(rows) {
     var a = {};
@@ -1887,7 +1992,7 @@
     return a;
   }
   function isActiveMonth(r) {
-    return Number(r.income) > 0 || Number(r.other_income) > 0 || Number(r.lessons_done) + Number(r.lessons_lost) + Number(r.lessons_cancelled) > 0 || Number(r.expenses) > 0 || Number(r.taxes_paid) > 0;
+    return Number(r.income) > 0 || Number(r.other_income) > 0 || Number(r.school_lessons) > 0 || Number(r.lessons_done) + Number(r.lessons_lost) + Number(r.lessons_cancelled) > 0 || Number(r.expenses) > 0 || Number(r.taxes_paid) > 0;
   }
   function pctChange(cur, prev) {
     if (cur == null || prev == null || prev === 0) return null;
@@ -1947,11 +2052,14 @@
       model.quarters = qs;
       qs.forEach(function (x) { if (!model.bestQ || x.income > model.bestQ.income) model.bestQ = x; if (!model.worstQ || x.income < model.worstQ.income) model.worstQ = x; });
     }
-    // податок за квартал: дохід кварталу × ставка + повний ЄСВ за квартал
+    // податок за квартал: дохід кварталу × ставка + ЄСВ кварталу (сума ЄСВ його місяців; для 2025 це 3 × 1760, у лютому-березні лише 2 місяці)
     var taxQs = type === 'year' ? [0, 3, 6, 9].map(function (k) { return shiftMonth(curStart, k); }) : [periodStartYm('quarter', curStart)];
+    var hasEsvCol = monthRows.some(function (r) { return r.esv != null; });   // у старому вигляді бази стовпця ще немає
     model.taxes = taxQs.filter(function (q) { return shiftMonth(q, 2) >= startYm && q <= nowYm; }).map(function (q) {
       var a = aggMonths(periodMonthsList('quarter', q).map(function (m) { return byYm[m]; }).filter(Boolean));
-      var rate = Number(cfg.tax_rate) || 0, esv = Number(cfg.esv_quarter) || 0;
+      var rate = Number(cfg.tax_rate) || 0, esvDefault = Number(cfg.esv_quarter) || 0;
+      // місяці, яких у базі ще немає (кінець поточного кварталу), рахуємо за ЄСВ із Налаштувань
+      var esv = hasEsvCol ? round2(periodMonthsList('quarter', q).reduce(function (s, m) { return s + (byYm[m] ? Number(byYm[m].esv) || 0 : esvDefault / 3); }, 0)) : esvDefault;
       var base = round2(a.income + a.other_income), tax = round2(base * rate + esv);
       return { ym: q, label: periodLabel('quarter', q), income: a.income, other: a.other_income, incomeTax: round2(base * rate), esv: esv, tax: tax, paid: a.taxes_paid, left: Math.max(0, round2(tax - a.taxes_paid)), over: round2(a.taxes_paid - tax) > 0 ? round2(a.taxes_paid - tax) : 0 };
     });
@@ -2019,12 +2127,14 @@
       !m.isCurrent ? h('button', { class: 'btn ghost small', type: 'button', text: 'Сьогодні', onclick: function () { S.statCursor = nowYm; render(); } }) : null,
       S.statType === 'year' ? h('button', { class: 'btn primary small', type: 'button', text: 'Рекап року', onclick: function () { openRecap(Number(m.cursor.slice(0, 4))); } }) : null);
     var c = m.cur, ongoingNote = m.isCurrent ? h('p', { class: 'item-sub', text: 'Цей період ще триває, тому цифри неповні' + (S.statType === 'month' ? ': ЄСВ у прибутку нараховується за весь місяць одразу, тож прибуток і ставка поки занижені.' : '.') }) : null;
-    var noEsv = !(Number(S.settings.esv_quarter) > 0)
-      ? h('div', { class: 'msg warn', role: 'status' }, 'ЄСВ за квартал не внесено в ', h('a', { href: '#/settings', text: 'Налаштування' }), ': податок-орієнтир занижений, а прибуток завищений.') : null;
+    var hasEsvCol = d.months.some(function (r) { return r.esv != null; });
+    var noEsv = (hasEsvCol ? (!(Number(c.esv) > 0) && c.income + c.other_income > 0) : !(Number(S.settings.esv_quarter) > 0))
+      ? h('div', { class: 'msg warn', role: 'status' }, 'ЄСВ за цей період не внесено в ', h('a', { href: '#/settings', text: 'Налаштування' }), ': податок-орієнтир занижений, а прибуток завищений.') : null;
     function kpi(label, value, sub) { return h('div', { class: 'kpi' }, h('div', { class: 'lbl', text: label }), h('div', { class: 'big-num', text: value }), sub ? h('div', { class: 'item-sub', text: sub }) : null); }
     var kpis = h('div', { class: 'kpi-grid' },
       kpi('Дохід від учнів', money(c.income), c.payments_count + ' ' + plural(c.payments_count, 'оплата', 'оплати', 'оплат')),
       c.other_income > 0 ? kpi('Інший дохід (школа)', money(c.other_income)) : null,
+      c.school_lessons > 0 ? kpi('Уроки в школі', String(c.school_lessons), '≈ ' + fmtHours(c.school_hours) + '. Разом із репетиторством заняттями: ' + (c.lessons_done + c.school_lessons)) : null,
       kpi('Чистий прибуток', money(c.net_profit), c.other_income > 0 ? 'з усіх доходів, після витрат і податку' : null),
       kpi('Реальна ставка', fmtRate(c.hourly_rate), S.statType === 'month' ? 'за місяць вона стрибає: оплати надходять нерівномірно, точніше видно за квартал' : (c.other_income > 0 ? 'лише за репетиторство' : null)),
       kpi('Години', fmtHours(c.hours), 'проведено ' + c.lessons_done + ', згоріло ' + c.lessons_lost + ', скасовано ' + c.lessons_cancelled));
@@ -2035,7 +2145,7 @@
         h('dt', { text: 'Витрати без податків' }), h('dd', { text: '− ' + money(c.expenses) }),
         h('dt', { text: 'Податок-орієнтир' }), h('dd', { text: '− ' + money(c.tax_estimate) }),
         h('dt', { class: 'total', text: 'Чистий прибуток' }), h('dd', { class: 'total', text: money(c.net_profit) })),
-      h('p', { class: 'hint', text: 'Податок-орієнтир за кожен місяць = (дохід' + (c.other_income > 0 ? ' від учнів + інший дохід' : '') + ') × ' + Number((Number(S.settings.tax_rate) * 100).toFixed(2)) + '% + ЄСВ ÷ 3. Фактично сплачені податки (' + money(c.taxes_paid) + ') від прибутку вдруге не віднімаються.' + (c.other_income > 0 ? ' Реальна ставка рахується лише з репетиторства: ЄСВ ділиться між доходами пропорційно.' : '') }));
+      h('p', { class: 'hint', text: 'Податок-орієнтир за кожен місяць = (дохід' + (c.other_income > 0 ? ' від учнів + інший дохід' : '') + ') × ' + Number((Number(S.settings.tax_rate) * 100).toFixed(2)) + '% + ЄСВ' + (hasEsvCol ? ' (за цей період ' + money(c.esv) + ')' : ' ÷ 3') + '. Фактично сплачені податки (' + money(c.taxes_paid) + ') від прибутку вдруге не віднімаються.' + (c.other_income > 0 ? ' Реальна ставка рахується лише з репетиторства: ЄСВ ділиться між доходами пропорційно.' : '') }));
 
     // підсумок: найвищий і найнижчий дохід
     function monthLine(label, x) { return h('li', { class: 'item' }, h('div', { class: 'item-main' }, h('span', { text: label })), h('div', { class: 'pay-side' }, h('span', { class: 'pay-sum', text: money(x.income) }), h('div', { class: 'item-sub', text: monthYearName(x.ym) + (x.ongoing ? ', ще триває' : '') }))); }
@@ -2059,6 +2169,8 @@
     // порівняння з минулим періодом
     var prevWord = { month: 'минулим місяцем', quarter: 'минулим кварталом', year: 'минулим роком' }[S.statType];
     var cmpRows = [['Дохід від учнів', 'income', money], ['Проведені заняття', 'lessons_done', function (x) { return String(x); }], ['Чистий прибуток', 'net_profit', money], ['Реальна ставка', 'hourly_rate', fmtRate]];
+    if (m.hasPrev && (c.other_income > 0 || m.prev.other_income > 0)) cmpRows.splice(1, 0, ['Дохід зі школи', 'other_income', money]);
+    if (m.hasPrev && (c.school_lessons > 0 || m.prev.school_lessons > 0)) cmpRows.splice(cmpRows.length - 2, 0, ['Уроки в школі', 'school_lessons', function (x) { return String(x); }]);
     var cmp = h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Порівняння з ' + prevWord }), m.hasPrev ? h('span', { class: 'count', text: m.prevLabel }) : null),
       m.hasPrev ? h('div', { class: 'cmp' }, cmpRows.map(function (r) {
         return h('div', { class: 'cmp-row' }, h('div', { class: 'cmp-name', text: r[0] }), h('div', { class: 'cmp-cur', text: r[2](c[r[1]]) }),
@@ -2090,6 +2202,10 @@
     if (a[2] >= last - 1) return dateStr.slice(0, 7);
     return null;
   }
+  // Підсумки писати треба лише за свіжі місяці: для старіших «не написано» не показуємо, щоб не нагадувати про минуле
+  function summaryStale(ym) { return ym < shiftMonth(todayStr().slice(0, 7), -3); }
+  var SUMMARY_HINT = 'Необовʼязково. Це короткий висновок про учня за місяць, 2–4 речення: що вдалося, що ще складно, що робимо далі. Його можна надіслати учневі або батькам. Нотатки до занять показані вище: на них можна спертися.';
+  var SUMMARY_EXAMPLE = 'Приклад: «У жовтні закрили Past Simple, Аня вільніше говорить у побутових діалогах. Ще плутає артиклі. У листопаді: Present Perfect і більше аудіювання».';
   function openSummaries(ym) { S.sumMonth = ym; if (location.hash === '#/summaries') onRouteChange(); else location.hash = '#/summaries'; }
 
   async function openSummaryEditor(studentId, ym) {
@@ -2127,7 +2243,7 @@
     var content = h('div', { class: 'stack' }, err,
       h('p', { class: 'note', text: 'Проведено ' + done.length + ' ' + lessonsWord(done.length) + ', ' + fmtHours(minutes / 60) + '. Згоріло ' + cnt('lost') + ', скасовано ' + cnt('cancelled') + '.' }),
       h('div', {}, h('div', { class: 'label-like', text: 'Нотатки до занять' }), notesBox),
-      h('div', { class: 'field' }, h('label', { class: 'label-like', text: 'Висновок' }), ta),
+      h('div', { class: 'field' }, h('label', { class: 'label-like', text: 'Висновок' }), ta, h('div', { class: 'hint', text: SUMMARY_HINT }), h('div', { class: 'hint', text: SUMMARY_EXAMPLE })),
       h('div', { class: 'slot-actions' }, save, h('button', { class: 'btn ghost', type: 'button', text: 'Закрити', onclick: function () { close(); } })));
     close = openModal('Підсумок за ' + monthName(ym) + ' ' + ym.slice(0, 4), st.name, content, { wide: true });
   }
@@ -2142,19 +2258,19 @@
     var body;
     if (!S.sumData || S.sumData.month !== ym) body = h('p', { class: 'skeleton', text: 'Завантаження…' });
     else {
-      var rows = S.sumData.rows, written = rows.filter(function (x) { return x.written; }).length;
+      var rows = S.sumData.rows, written = rows.filter(function (x) { return x.written; }).length, stale = summaryStale(ym);
       body = rows.length ? [
-        h('p', { class: 'month-total' }, h('span', { class: 'big-num', text: written + ' з ' + rows.length }), h('span', { class: 'lbl', text: 'підсумків написано' })),
+        h('p', { class: 'month-total' }, h('span', { class: 'big-num', text: stale ? String(written) : written + ' з ' + rows.length }), h('span', { class: 'lbl', text: stale ? 'підсумків написано (за старі місяці писати не обовʼязково)' : 'підсумків написано' })),
         h('ul', { class: 'list' }, rows.map(function (x) {
           return h('li', { class: 'item' },
             h('div', { class: 'item-main' }, h('div', { class: 'pay-title' }, h('a', { class: 'pay-who first', href: '#/students/' + encodeURIComponent(x.id), text: x.name })),
               h('div', { class: 'item-sub', text: 'Проведено ' + x.done + ' ' + lessonsWord(x.done) + ', ' + fmtHours(x.minutes / 60) })),
-            h('div', { class: 'item-actions' }, h('span', { class: 'tag ' + (x.written ? 'ok' : 'muted'), text: x.written ? 'написано' : 'не написано' }),
-              h('button', { class: 'btn ' + (x.written ? 'ghost' : 'primary') + ' small', type: 'button', text: x.written ? 'Відкрити' : 'Написати', onclick: function () { openSummaryEditor(x.id, ym).catch(fail); } })));
+            h('div', { class: 'item-actions' }, x.written || !stale ? h('span', { class: 'tag ' + (x.written ? 'ok' : 'muted'), text: x.written ? 'написано' : 'не написано' }) : null,
+              h('button', { class: 'btn ' + (x.written || stale ? 'ghost' : 'primary') + ' small', type: 'button', text: x.written ? 'Відкрити' : 'Написати', onclick: function () { openSummaryEditor(x.id, ym).catch(fail); } })));
         }))
       ] : h('p', { class: 'item-sub', text: 'У цьому місяці проведених занять немає, підсумки писати не треба.' });
     }
-    return page(h('p', { class: 'crumb' }, h('a', { href: '#/students', text: 'Усі учні' })), h('div', { class: 'page-head' }, h('h1', { text: 'Підсумки місяця' })), nav, body);
+    return page(h('p', { class: 'crumb' }, h('a', { href: '#/students', text: 'Усі учні' })), h('div', { class: 'page-head' }, h('h1', { text: 'Підсумки місяця' })), h('p', { class: 'hint', text: SUMMARY_HINT }), nav, body);
   }
 
   // блок у картці учня
@@ -2174,7 +2290,7 @@
         var x = byMonth[ym];
         return h('li', { class: 'item' },
           h('div', { class: 'item-main' }, h('div', { class: 'pay-title', text: monthYearName(ym) }), h('div', { class: 'item-sub', text: 'Проведено ' + x.done + ' ' + lessonsWord(x.done) + ', ' + fmtHours(x.minutes / 60) })),
-          h('div', { class: 'item-actions' }, h('span', { class: 'tag ' + (written[ym] ? 'ok' : 'muted'), text: written[ym] ? 'написано' : 'не написано' }),
+          h('div', { class: 'item-actions' }, written[ym] || !summaryStale(ym) ? h('span', { class: 'tag ' + (written[ym] ? 'ok' : 'muted'), text: written[ym] ? 'написано' : 'не написано' }) : null,
             h('button', { class: 'btn ghost small', type: 'button', text: written[ym] ? 'Відкрити' : 'Написати', onclick: function () { openSummaryEditor(st.id, ym).catch(fail); } })));
       })) : h('p', { class: 'item-sub', text: 'Проведених занять ще немає.' }));
   }
@@ -2195,7 +2311,7 @@
   function recapSeen(year) { try { return localStorage.getItem('crm-recap-seen-' + year) === '1'; } catch (e) { return false; } }
   function markRecapSeen(year) { try { localStorage.setItem('crm-recap-seen-' + year, '1'); } catch (e) {} }
   function openRecap(year) {
-    S.recapYear = year; S.recapIdx = 0; S.recapData = null; markRecapSeen(year);
+    S.recapYear = year; S.recapIdx = 0; S.recapData = null; S.recapReveal = false; markRecapSeen(year);
     if (location.hash === '#/recap') onRouteChange(); else location.hash = '#/recap';
   }
   function tallyKey(arr, keyFn) { var m = {}; arr.forEach(function (x) { var k = keyFn(x); m[k] = (m[k] || 0) + 1; }); return m; }
@@ -2219,15 +2335,38 @@
     var partial = year === today.slice(0, 4);
     var cards = [];
     var cnt = function (n) { return n + ' ' + lessonsWord(n); };
+    var schoolWord = function (n) { return plural(n, 'урок', 'уроки', 'уроків'); };
 
     cards.push({ key: 'intro', lead: 'Твій рік у цифрах', big: year, lines: [partial ? 'Станом на ' + dmFmt.format(utcDate(today)) : 'Підсумок року'] });
 
-    cards.push({ key: 'lessons', lead: 'Цього року ти провела', big: String(c.lessons_done), count: { value: c.lessons_done, fmt: 'int' }, unit: lessonsWord(c.lessons_done), lines: ['Це ' + fmtHours(c.hours) + ' з учнями'] });
+    var lessonLines = ['Це ' + fmtHours(c.hours) + ' з учнями'];
+    if (c.school_lessons > 0) lessonLines.push('І ще ' + c.school_lessons + ' ' + schoolWord(c.school_lessons) + ' у школі');
+    cards.push({ key: 'lessons', lead: 'Цього року ти провела', big: String(c.lessons_done), count: { value: c.lessons_done, fmt: 'int' }, unit: lessonsWord(c.lessons_done), lines: lessonLines });
 
     var incLines = [];
     if (sm.months.length > 1 && sm.best && sm.best.income > 0) incLines.push('Найкращий місяць: ' + monthName(sm.best.ym) + ', ' + money(sm.best.income));
     if (c.other_income > 0) incLines.push('Окремо інший дохід: ' + money(c.other_income));
     cards.push({ key: 'income', lead: 'Отримано від учнів за рік', big: money(c.income), count: { value: c.income, fmt: 'money' }, lines: incLines });
+
+    // школа: уроки й дохід із порівнянням з минулим роком (за рік, що триває, порівнюємо ті самі завершені місяці)
+    if (c.school_lessons > 0 || c.other_income > 0) {
+      var prevYr = String(Number(year) - 1), nowM = Number(nowYm.slice(5)), upto = partial ? nowM - 1 : 12;
+      var spanOf = function (y) { return aggMonths(a.months.filter(function (r) { return r.month.slice(0, 4) === y && Number(r.month.slice(5, 7)) <= upto; })); };
+      var dtxt = function (p) { return p == null ? '—' : p === 0 ? 'без змін' : (p > 0 ? '▲ +' : '▼ −') + Math.abs(p) + '%'; };
+      var hasPrevSchool = a.months.some(function (r) { return r.month.slice(0, 4) === prevYr && (Number(r.school_lessons) > 0 || Number(r.other_income) > 0); });
+      var schLines = [];
+      if (c.school_lessons > 0 && c.other_income > 0) schLines.push('Дохід зі школи: ' + money(c.other_income));
+      if (c.school_lessons > 0) schLines.push('Це ' + fmtHours(c.school_hours));
+      if (hasPrevSchool && upto >= 1) {
+        var cs = spanOf(year), ps = spanOf(prevYr);
+        var per = partial ? (upto === 1 ? monthName(year + '-01') : monthName(year + '-01') + '–' + monthName(year + '-' + pad(upto))) : 'за весь рік';
+        schLines.push('У ' + prevYr + (partial ? ' за ті самі місяці (' + per + ')' : '') + ': ' + ps.school_lessons + ' ' + schoolWord(ps.school_lessons) + ' у школі, ' + money(ps.other_income));
+        var pu = pctChange(cs.school_lessons, ps.school_lessons), pi = pctChange(cs.other_income, ps.other_income);
+        if (pu != null || pi != null) schLines.push('Зміна до ' + prevYr + ': уроків ' + dtxt(pu) + ', доходу ' + dtxt(pi));
+      }
+      if (c.school_lessons > 0) cards.push({ key: 'school', lead: 'У школі цього року ти провела', big: String(c.school_lessons), count: { value: c.school_lessons, fmt: 'int' }, unit: schoolWord(c.school_lessons), lines: schLines });
+      else cards.push({ key: 'school', lead: 'Дохід зі школи за рік', big: money(c.other_income), count: { value: c.other_income, fmt: 'money' }, lines: schLines });
+    }
 
     // учні
     var perStudent = tallyKey(done, function (x) { return x.l.student_id; });
@@ -2242,7 +2381,7 @@
     if (n >= 2) {
       var nameOf = {}; (a.students || []).forEach(function (s) { nameOf[s.id] = s.name; });
       var topId = topKey(perStudent, function (x, y) { return String(nameOf[x] || x).localeCompare(String(nameOf[y] || y), 'uk') < 0; });
-      cards.push({ key: 'top', lead: 'Найбільше занять ти провела з', big: maskName(nameOf[topId] || 'Учень'), textBig: true, unit: cnt(perStudent[topId]) });
+      cards.push({ key: 'top', lead: 'Найбільше занять ти провела з', big: maskName(nameOf[topId] || 'Учень'), reveal: nameOf[topId] || 'Учень', textBig: true, unit: cnt(perStudent[topId]) });
     }
     if (done.length) {
       var byMonth = tallyKey(done, function (x) { return x.ym; }), byDay = tallyKey(done, function (x) { return x.day; });
@@ -2262,7 +2401,7 @@
     if (sent > 0) cards.push({ key: 'homework', lead: 'Домашні завдання', big: String(sent), count: { value: sent, fmt: 'int' }, unit: 'надіслано', lines: ['Перевірено: ' + checked] });
 
     var pLines = ['Реальна ставка' + (c.other_income > 0 ? ' (лише репетиторство)' : '') + ': ' + fmtRate(c.hourly_rate), 'Після витрат і податку-орієнтиру' + (c.other_income > 0 ? ', з усіх доходів' : '')];
-    if (!(Number(a.cfg && a.cfg.esv_quarter) > 0)) pLines.push('ЄСВ не внесено в Налаштування, тому прибуток завищений');
+    if (c.esv != null ? !(Number(c.esv) > 0) : !(Number(a.cfg && a.cfg.esv_quarter) > 0)) pLines.push('ЄСВ не внесено в Налаштування, тому прибуток завищений');
     cards.push({ key: 'profit', lead: 'Чистий прибуток', big: money(c.net_profit), count: { value: c.net_profit, fmt: 'money' }, lines: pLines });
 
     var prev = sm.prev, prevYear = String(Number(year) - 1);
@@ -2320,9 +2459,13 @@
         })));
         kids.push(h('p', { class: 'recap-line', text: c.partial ? 'Рік ще триває: цифри оновляться.' : 'Це був твій рік у цифрах.' }));
       } else {
-        var big = h('div', { class: 'recap-big' + (c.textBig ? ' text' : ''), text: c.big, 'data-final': c.big });
+        var shown = c.reveal && S.recapReveal ? c.reveal : c.big;
+        var big = h('div', { class: 'recap-big' + (c.textBig ? ' text' : ''), text: shown, 'data-final': shown });
         kids.push(big);
         if (c.unit) kids.push(h('p', { class: 'recap-unit', text: c.unit }));
+        if (c.reveal) kids.push(h('div', { class: 'recap-reveal' },
+          h('button', { class: 'btn ghost small', type: 'button', 'aria-pressed': String(!!S.recapReveal), text: S.recapReveal ? 'Сховати імʼя' : 'Показати імʼя', onclick: function () { S.recapReveal = !S.recapReveal; show(S.recapIdx, false); } }),
+          S.recapReveal ? h('p', { class: 'recap-line', text: 'Імʼя видно: перед тим як ділитися рекапом, сховай його.' }) : h('p', { class: 'recap-line', text: 'Імʼя сховане, щоб рекап можна було публікувати.' })));
         (c.lines || []).forEach(function (t) { kids.push(h('p', { class: 'recap-line', text: t })); });
         if (c.count) window.setTimeout(function () { animateCount(big, c.count.value, c.count.fmt); }, 0);
       }
@@ -2359,8 +2502,8 @@
   }
 
   // ================= Відновлення з копії (те саме, що в restore.html, щоб не залежати від окремого файлу) =================
-  var RESTORE_TABLES = ['students', 'packages', 'payments', 'lessons', 'expenses', 'tasks', 'tax_deadlines', 'monthly_summaries', 'other_income'];
-  var RESTORE_LABELS = { settings: 'Налаштування', students: 'Учні', packages: 'Пакети занять', payments: 'Оплати', lessons: 'Заняття', expenses: 'Витрати', tasks: 'Завдання', tax_deadlines: 'Дати податків', monthly_summaries: 'Підсумки місяців', other_income: 'Інший дохід' };
+  var RESTORE_TABLES = ['students', 'packages', 'payments', 'lessons', 'expenses', 'tasks', 'tax_deadlines', 'monthly_summaries', 'other_income', 'school_lessons', 'esv_rates'];
+  var RESTORE_LABELS = { settings: 'Налаштування', students: 'Учні', packages: 'Пакети занять', payments: 'Оплати', lessons: 'Заняття', expenses: 'Витрати', tasks: 'Завдання', tax_deadlines: 'Дати податків', monthly_summaries: 'Підсумки місяців', other_income: 'Інший дохід', school_lessons: 'Уроки в школі', esv_rates: 'ЄСВ по роках' };
   var RESTORE_SKIP = { packages: ['price_per_lesson'] };   // обчислювана колонка: база сама її рахує
   function restoreLit(v) {
     if (v === null || v === undefined) return 'null';
@@ -2384,7 +2527,7 @@
     out.push('begin;');
     if (opts.truncate) {
       out.push('\n-- Видалення поточних даних (налаштування лишаються)');
-      out.push('truncate table ' + ['monthly_summaries', 'tasks', 'expenses', 'lessons', 'payments', 'packages', 'students', 'tax_deadlines', 'other_income'].map(function (x) { return 'public.' + x; }).join(', ') + ';');
+      out.push('truncate table ' + ['monthly_summaries', 'tasks', 'expenses', 'lessons', 'payments', 'packages', 'students', 'tax_deadlines', 'other_income', 'school_lessons', 'esv_rates'].map(function (x) { return 'public.' + x; }).join(', ') + ';');
     }
     var st = (t.settings || [])[0];
     if (st) {
@@ -2424,7 +2567,7 @@
     var err = errBox(), summary = h('div', { hidden: true }), result = h('div', { class: 'stack', hidden: true });
     var file = h('input', { type: 'file', accept: '.json,application/json' });
     var trunc = h('input', { type: 'checkbox', class: 'check' });
-    var truncWarn = h('p', { class: 'note bad', hidden: true, text: 'Усіх учнів, оплати, заняття, витрати, завдання, дати податків, підсумки місяців і інший дохід у базі буде видалено перед відновленням. Роби це лише якщо впевнена, що файл копії актуальний.' });
+    var truncWarn = h('p', { class: 'note bad', hidden: true, text: 'Усіх учнів, оплати, заняття, витрати, завдання, дати податків, підсумки місяців інший дохід, уроки в школі й ЄСВ по роках у базі буде видалено перед відновленням. Роби це лише якщо впевнена, що файл копії актуальний.' });
     var options = h('div', { class: 'stack', hidden: true });
     var area = h('textarea', { readonly: true, 'aria-label': 'Згенерований SQL', class: 'sql-area' });
     var info = h('p', { class: 'item-sub' });
