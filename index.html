@@ -18,6 +18,13 @@
   })();
 </script>
 <style>
+  /* Шрифти Kyiv*Type лежать у папці fonts поруч з index.html; без них працюють запасні */
+  @font-face { font-family: "KyivType Sans"; src: url("fonts/KyivTypeSans-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "KyivType Sans"; src: url("fonts/KyivTypeSans-Medium.woff2") format("woff2"); font-weight: 500 700; font-display: swap; }
+  @font-face { font-family: "KyivType Serif"; src: url("fonts/KyivTypeSerif-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "KyivType Serif"; src: url("fonts/KyivTypeSerif-Medium.woff2") format("woff2"); font-weight: 500 700; font-display: swap; }
+  @font-face { font-family: "KyivType Titling"; src: url("fonts/KyivTypeTitling-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "KyivType Titling"; src: url("fonts/KyivTypeTitling-Medium.woff2") format("woff2"); font-weight: 500 700; font-display: swap; }
   :root {
     --bg: #F2EDE4;
     --surface: #FAF7F1;
@@ -36,8 +43,10 @@
     --warn: #8A6A1E;
     --warn-soft: #F3E8CC;
     --shadow: 0 1px 2px rgba(42, 46, 41, .06);
-    --serif: "Cormorant Garamond", "Georgia", "Times New Roman", serif;
-    --sans: "Onest", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --serif: "KyivType Serif", "Cormorant Garamond", "Georgia", "Times New Roman", serif;
+    --sans: "KyivType Sans", "Onest", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --label: "KyivType Titling", "KyivType Sans", "Onest", system-ui, sans-serif;
+    --paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .36 0 0 0 0 .31 0 0 0 0 .22 0 0 0 .06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
   :root[data-theme="dark"] {
     --bg: #1B201C;
@@ -57,6 +66,7 @@
     --warn: #E3C16F;
     --warn-soft: #3A3220;
     --shadow: none;
+    --paper: none;
   }
   * { box-sizing: border-box; }
   html { -webkit-text-size-adjust: 100%; }
@@ -350,6 +360,75 @@
 
   @media (prefers-reduced-motion: no-preference) {
     .btn, .icon-btn { transition: background-color .15s ease; }
+  }
+
+  /* ---------- дизайн-шар: Kyiv*Type, «тихий люкс» ---------- */
+  html { font-synthesis: none; }
+  body { font-size: 15px; letter-spacing: .004em; background-image: var(--paper); }
+  h1 { font-weight: 400; font-size: clamp(2rem, 5vw, 2.8rem); letter-spacing: -.005em; }
+  h2 { font-weight: 400; font-size: 1.35rem; letter-spacing: 0; }
+  .big-bal { font-size: 1.55rem; }
+  .brand { font-weight: 500; font-size: 1.3rem; letter-spacing: .02em; }
+  :focus-visible { outline: 2px solid var(--lilac); outline-offset: 3px; }
+
+  /* підписи: Titling капітеллю з розрядкою */
+  .sub-title, .info dt, .kpi .lbl, .stat .lbl, .field label, .label-like, .count, .bn-item, .hint-cap {
+    font-family: var(--label); text-transform: uppercase; letter-spacing: .09em; font-size: .68rem; font-weight: 400; color: var(--muted);
+  }
+  .bn-item { font-size: .62rem; }
+  .field label, .label-like { margin-bottom: 7px; }
+  .info { gap: 10px 22px; } .info dt { padding-top: 4px; } .info dd { font-size: .98rem; }
+  .tag { border-radius: 4px; font-family: var(--label); text-transform: uppercase; letter-spacing: .07em; font-size: .64rem; font-weight: 400; padding: 3px 8px; }
+  .tag svg { width: 12px; height: 12px; }
+
+  /* розділ: тонка лінія з зеленим «язичком» */
+  .section-head { border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 8px; position: relative; align-items: flex-end; }
+  .section-head::after { content: ""; position: absolute; left: 0; bottom: -1px; width: 34px; height: 1px; background: var(--green); }
+  .section-head .count { padding-bottom: 4px; }
+  .month-total, .big-bal { margin-top: 6px; }
+
+  /* кнопки: тихіші, з меншим заокругленням */
+  .btn { border-radius: 8px; letter-spacing: .02em; font-weight: 500; min-height: 42px; }
+  .btn.small { border-radius: 7px; min-height: 36px; font-size: .88rem; }
+  .btn.primary { box-shadow: none; }
+  .btn.ghost { border-color: color-mix(in srgb, var(--ink) 22%, var(--bg)); }
+  .btn.link { text-decoration-thickness: 1px; }
+  input[type="text"], input[type="email"], input[type="datetime-local"], input[type="date"], input[type="time"], select, textarea { border-radius: 8px; min-height: 42px; }
+  input, select, textarea, button { font-family: inherit; }
+  input:focus, select:focus, textarea:focus { border-color: var(--green); outline: 1px solid var(--green); outline-offset: 0; }
+  .seg { background: transparent; border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
+  .seg-btn { border-radius: 6px; min-height: 36px; font-size: .9rem; }
+  .seg-btn[aria-pressed="true"] { background: var(--green-soft); color: var(--green-deep); box-shadow: none; }
+
+  /* сьогодні: лілова мітка замість зеленої «картки» */
+  .timeline::before { width: 1px; }
+  .slot { grid-template-columns: 4.6rem 1.5rem minmax(0, 1fr); }
+  .slot-time { font-weight: 400; font-size: 1.55rem; padding-top: 9px; }
+  .slot-dot { width: 11px; height: 11px; margin: 17px 0 0 12px; border-width: 1.5px; }
+  .slot.next .slot-dot { background: var(--lilac); border-color: var(--lilac); box-shadow: 0 0 0 5px var(--lilac-soft); }
+  .slot.next .slot-body { background: color-mix(in srgb, var(--lilac-soft) 55%, transparent); box-shadow: inset 2px 0 0 var(--lilac); border-radius: 2px 12px 12px 2px; }
+  .slot-title { font-weight: 500; }
+  .person-name, .pay-title, .cmp-name { font-weight: 500; }
+  .person { padding: 15px 6px; } .person:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+  .debt-box, .msg, .note { border-radius: 9px; }
+  .modal { border-radius: 14px; box-shadow: 0 24px 70px rgba(28, 34, 30, .28); }
+  .modal h2 { font-size: 1.4rem; }
+
+  /* підсумок місяця: редакційна смуга замість плашки */
+  .summary { background: transparent; border-radius: 0; border-top: 1px solid var(--line); padding: 22px 0 0; }
+  .summary .big, .big-num, .kpi .big-num, .pay-sum, .cmp-cur, .big-bal, .day-count .big, .recap-big, .recap-fig-val { font-weight: 400; }
+
+  /* меню */
+  .nav a { border-radius: 0; padding: 0 14px; font-size: .92rem; letter-spacing: .02em; }
+  .nav a:hover { background: transparent; color: var(--ink); }
+  .nav a[aria-current="page"] { background: transparent; color: var(--ink); box-shadow: inset 0 -2px 0 var(--green); }
+  @media (max-width: 860px) {
+    .bottom-nav { background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); padding-top: 2px; }
+    .bn-item { border-radius: 0; min-height: 54px; }
+    .bn-item[aria-current="page"] { background: transparent; color: var(--green-deep); box-shadow: inset 0 2px 0 var(--lilac); }
+    .more-sheet { border-radius: 12px; }
+    .more-sheet a { border-radius: 8px; }
+    .more-sheet a[aria-current="page"] { background: var(--green-soft); }
   }
 </style>
 </head>
