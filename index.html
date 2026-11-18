@@ -96,6 +96,11 @@
   h1, h2 { margin: 0; font-family: var(--serif); font-weight: 600; letter-spacing: .005em; }
   h1 { font-size: clamp(2.4rem, 5vw, 3.4rem); line-height: 1.05; color: var(--ink); }
   h2 { font-size: 1.7rem; line-height: 1.15; }
+  .day-count { margin: 14px 0 0; display: flex; align-items: baseline; gap: 8px; }
+  .day-count .big { font-family: var(--serif); font-size: 2.6rem; font-weight: 600; line-height: 1; font-variant-numeric: lining-nums; }
+  .day-count .lbl { color: var(--muted); font-size: 1.02rem; }
+  .add-details summary { cursor: pointer; color: var(--green-deep); font-weight: 500; padding: 8px 0; list-style: none; }
+  .add-details summary::-webkit-details-marker { display: none; }
   .date-line { color: var(--muted); margin: 6px 0 0; font-size: 1.02rem; }
   .section { margin-bottom: 44px; }
   .section:last-child { margin-bottom: 0; }
@@ -169,11 +174,24 @@
 
   /* ---------- навігація та розділи ---------- */
   .topbar { flex-wrap: wrap; }
+  .bottom-nav { display: none; }
+  .sum-line { margin: 12px 0 0; } .sortbar { display: flex; align-items: center; gap: 10px; margin: 10px 0 6px; flex-wrap: wrap; }
+  .item-actions.left { justify-content: flex-start; margin-top: 12px; } .more-btn { margin-top: 12px; }
+  .facts { margin-top: 14px; }
   .nav { display: flex; gap: 4px; margin-left: 16px; flex: 1; }
   .nav a { min-height: 44px; padding: 0 16px; border-radius: 12px; color: var(--muted); text-decoration: none; font-weight: 500; display: inline-flex; align-items: center; }
   .nav a:hover { background: var(--surface-2); color: var(--ink); }
   .nav a[aria-current="page"] { background: var(--green-soft); color: var(--green-deep); }
-  @media (max-width: 860px) { .nav { order: 3; flex-basis: 100%; margin: 0 -8px; overflow-x: auto; } }
+  @media (max-width: 860px) {
+    .topbar .nav { display: none; }
+    .page { padding-bottom: 110px; }
+    .bottom-nav { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: var(--surface); border-top: 1px solid var(--line); padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); }
+    .bn-item { min-height: 52px; display: flex; align-items: center; justify-content: center; border: 0; background: transparent; border-radius: 12px; color: var(--muted); font-size: .8rem; font-weight: 500; text-decoration: none; font-family: inherit; }
+    .bn-item[aria-current="page"] { background: var(--green-soft); color: var(--green-deep); }
+    .more-sheet { position: absolute; right: 8px; bottom: calc(100% + 8px); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 6px; min-width: 210px; display: flex; flex-direction: column; }
+    .more-sheet a { min-height: 48px; display: flex; align-items: center; padding: 0 16px; border-radius: 10px; color: var(--ink); text-decoration: none; font-weight: 500; }
+    .more-sheet a[aria-current="page"] { background: var(--green-soft); color: var(--green-deep); }
+  }
   .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
   .page-head .tag { margin-top: 8px; }
   .head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -324,6 +342,7 @@
   .note.bad { background: var(--danger-soft); color: var(--danger); }
   .stack { display: grid; gap: 10px; }
   .toasts { position: fixed; left: 0; right: 0; bottom: 18px; display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 60; pointer-events: none; padding: 0 12px; }
+  @media (max-width: 860px) { .toasts { bottom: 84px; } }
   .toast { pointer-events: auto; background: var(--ink); color: var(--bg); padding: 12px 16px; border-radius: 14px; display: flex; gap: 14px; align-items: center; max-width: 520px; }
   .toast .btn.link { color: var(--bg); min-height: 32px; }
   .toast.err { background: var(--danger); color: #fff; }
@@ -450,16 +469,7 @@
         out.push({ key: 'hw-check-' + l.id, type: 'hw-check', lesson: l, text: 'Перевір домашку ' + name(l.student_id), sub: 'Заняття ' + fmtDayMonth(kyivDateStr(new Date(l.starts_at).getTime())) });
       }
     });
-    // 4. Нагадати про оплату
-    var thr = s.settings.soon_pay_threshold;
-    s.balances.forEach(function (b) {
-      var st = s.studentMap[b.student_id];
-      if (!st || st.status !== 'active') return;
-      if (!(b.lessons_bought > 0 || b.lessons_used > 0)) return;
-      if (b.balance <= thr) {
-        out.push({ key: 'pay-' + b.student_id, type: 'pay', text: 'Нагадай про оплату ' + st.name, sub: balanceText(b.balance), danger: b.balance < 0 });
-      }
-    });
+    // 4. Оплати показує окремий блок «Оплати» на Головній (щоб не дублювати)
     // 5. Податки
     s.deadlines.forEach(function (d) {
       var left = daysBetween(today, d.due_date);
@@ -556,7 +566,7 @@
 
   // ================= Стан і доступ до даних =================
   var sb = null;
-  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '' }, payMonth: kyivDateStr(Date.now()).slice(0, 7), schedWeek: mondayOf(kyivDateStr(Date.now())), weekData: null, genAt: 0, scheduleError: false, expMonth: kyivDateStr(Date.now()).slice(0, 7), expData: null, setData: null, genExpAt: 0, recurringError: false, statData: null, recapData: null, recapIdx: 0, recapYear: (function () { var t = kyivDateStr(Date.now()); return recapOfferYear(t) || Number(t.slice(0, 4)); })(), sumData: null, sumMonth: (summaryTarget(kyivDateStr(Date.now())) || kyivDateStr(Date.now()).slice(0, 7)), statType: 'month', statCursor: kyivDateStr(Date.now()).slice(0, 7) };
+  var S = { session: null, ready: false, loading: false, error: null, noAccess: false, loadedAt: 0, route: parseRoute(), card: null, payData: null, studentFilter: { status: 'active', q: '', sort: 'pay' }, payMonth: kyivDateStr(Date.now()).slice(0, 7), schedWeek: mondayOf(kyivDateStr(Date.now())), weekData: null, genAt: 0, scheduleError: false, expMonth: kyivDateStr(Date.now()).slice(0, 7), expData: null, setData: null, genExpAt: 0, recurringError: false, statData: null, recapData: null, recapIdx: 0, recapYear: (function () { var t = kyivDateStr(Date.now()); return recapOfferYear(t) || Number(t.slice(0, 4)); })(), sumData: null, sumMonth: (summaryTarget(kyivDateStr(Date.now())) || kyivDateStr(Date.now()).slice(0, 7)), statType: 'month', statCursor: kyivDateStr(Date.now()).slice(0, 7) };
   var app = document.getElementById('app');
 
   function must(res) { if (res.error) throw res.error; return res.data; }
@@ -579,7 +589,8 @@
       sb.from('tax_deadlines').select('*').gte('due_date', today).lte('due_date', addDaysStr(today, 30)).order('due_date', { ascending: true }),
       sb.from('stats_month').select('*').eq('month', monthFirst).maybeSingle(),
       sb.from('lessons').select('*').eq('status', 'planned').gte('starts_at', iso(range.end)).order('starts_at', { ascending: true }).limit(1),
-      sb.from('expenses').select('*').eq('status', 'pending').lte('spent_at', today).order('spent_at', { ascending: true })
+      sb.from('expenses').select('*').eq('status', 'pending').lte('spent_at', today).order('spent_at', { ascending: true }),
+      sb.from('lessons').select('*').gte('starts_at', iso(range.end)).lt('starts_at', iso(dayRange(range.end + 3600000).end)).order('starts_at', { ascending: true })
     ]);
     var settingsRes = r[0];
     if (settingsRes.error) throw settingsRes.error;
@@ -598,6 +609,7 @@
     next.month = r[8].error ? null : r[8].data;
     next.nextLesson = (must(r[9]) || [])[0] || null;
     next.pendingExpenses = r[10].error ? [] : (r[10].data || []);
+    next.tomorrowLessons = r[11].error ? [] : (r[11].data || []);
     // прогрес підсумків місяця (лише коли їх пора писати)
     var target = summaryTarget(today), progress = null;
     if (target) {
@@ -827,6 +839,50 @@
     return (sch || []).slice().sort(function (a, b) { return a.weekday - b.weekday || String(a.time).localeCompare(String(b.time)); })
       .map(function (x) { return WEEKDAYS[x.weekday - 1] + ' ' + x.time; }).join(', ');
   }
+  // ---------- прогноз: до якої дати вистачить оплачених занять (приблизно, за постійним розкладом) ----------
+  function paidUntil(st, balance, nowMs) {
+    var sch = (st && st.schedule) || [];
+    if (!sch.length || !(balance > 0)) return null;
+    var today = kyivDateStr(nowMs), cnt = 0;
+    for (var i = 0; i < 400; i++) {
+      var d = addDaysStr(today, i), a = d.split('-').map(Number);
+      var wd = new Date(Date.UTC(a[0], a[1] - 1, a[2])).getUTCDay() || 7;
+      var slots = sch.filter(function (x) { return Number(x.weekday) === wd; }).sort(function (x, y) { return String(x.time).localeCompare(String(y.time)); });
+      for (var k = 0; k < slots.length; k++) {
+        var t = String(slots[k].time).split(':');
+        if (kyivWallToUtc(a[0], a[1], a[2], +t[0], +t[1]) > nowMs) { cnt++; if (cnt === balance) return d; }
+      }
+    }
+    return null;
+  }
+  function paidUntilOf(st) {
+    var b = balanceOf(st.id);
+    return st.status === 'active' && b ? paidUntil(st, b.balance, Date.now()) : null;
+  }
+  function reminderText(st, bal) {
+    var hi = 'Привіт, ' + st.name + '! ';
+    var tail = 'Коли буде зручно, надішли, будь ласка, оплату за наступний пакет занять.';
+    if (bal < 0) return hi + 'Нагадую про оплату: за моїми записами є ' + Math.abs(bal) + ' ' + lessonsWord(bal) + ' у борг. ' + tail;
+    if (bal === 0) return hi + 'Оплачені заняття закінчились. ' + tail;
+    return hi + 'Нагадую, що в пакеті залишилось ' + bal + ' ' + lessonsWord(bal) + '. ' + tail;
+  }
+  function copyText(text) {
+    function fallback() {
+      var ta = h('textarea', { 'aria-hidden': 'true', style: 'position:fixed;opacity:0;left:-999px' }); ta.value = text;
+      document.body.append(ta); ta.select(); var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) {} ta.remove(); return ok;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return fallback(); });
+    return Promise.resolve(fallback());
+  }
+  function copyReminder(st) {
+    var b = balanceOf(st.id), text = reminderText(st, b ? b.balance : 0);
+    copyText(text).then(function (ok) {
+      if (ok) { toast('Нагадування для ' + st.name + ' скопійовано. Встав його в чат.'); return; }
+      var ta = h('textarea', { rows: '5', readonly: 'readonly', style: 'width:100%' }); ta.value = text;
+      openModal('Нагадування', st.name, ta); ta.focus(); ta.select();
+    });
+  }
   function balanceOf(studentId) { return (S.balances || []).find(function (b) { return b.student_id === studentId; }) || null; }
   function sel(options, value) {
     var el = h('select', {}, options.map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
@@ -952,7 +1008,7 @@
     });
   }
   function onRouteChange() {
-    S.route = parseRoute(); S.card = null; S.payData = null; S.weekData = null; S.expData = null; S.setData = null; S.statData = null; S.sumData = null; S.recapData = null; S.error = null;
+    S.route = parseRoute(); S.card = null; S.cardAll = false; S.cardAllPay = false; S.cardAllSum = false; S.moreOpen = false; S.payData = null; S.weekData = null; S.expData = null; S.setData = null; S.statData = null; S.sumData = null; S.recapData = null; S.error = null;
     try { window.scrollTo(0, 0); } catch (e) {}
     render();
     if (S.session && S.settings) loadRouteSafely();
@@ -963,15 +1019,31 @@
     var f = S.studentFilter;
     var listBox = h('ul', { class: 'list people' });
     var segBox = h('div', { class: 'seg', role: 'group', 'aria-label': 'Статус учнів' });
+    var sortBox = h('div', { class: 'seg', role: 'group', 'aria-label': 'Сортування' });
+    var sumLine = h('p', { class: 'item-sub sum-line' });
     var search = h('input', { type: 'text', 'aria-label': 'Пошук за іменем', placeholder: 'Пошук за іменем', value: f.q, autocomplete: 'off' });
     function draw() {
       var q = f.q.trim().toLowerCase();
+      var byName = function (a, b) { return (a.name || '').localeCompare(b.name || '', 'uk'); };
+      function payKey(st) {
+        var bl = balanceOf(st.id);
+        if (!bl || (bl.lessons_bought === 0 && bl.lessons_used === 0)) return 9e15;
+        if (bl.balance <= 0) return bl.balance - 1e6;
+        var d = paidUntilOf(st);
+        return d ? Date.parse(d) / 86400000 : 1e6 + bl.balance;
+      }
       var rows = S.students.filter(function (s) { return s.status === f.status && (!q || (s.name || '').toLowerCase().indexOf(q) !== -1); })
-        .sort(function (a, b) { return (a.name || '').localeCompare(b.name || '', 'uk'); });
+        .sort(f.sort === 'pay' ? function (a, b) { return payKey(a) - payKey(b) || byName(a, b); } : byName);
+      var pp = buildPayments(S), needPay = pp.debt.length + pp.now.length + pp.soon.length, nAct = S.students.filter(function (s) { return s.status === 'active'; }).length;
+      sumLine.textContent = 'Активних: ' + nAct + (needPay ? ', потрібна оплата або скоро: ' + needPay : ', усі з оплаченими заняттями');
+      sortBox.replaceChildren.apply(sortBox, [['pay', 'За оплатою'], ['name', 'За іменем']].map(function (o) {
+        return h('button', { class: 'seg-btn', type: 'button', 'aria-pressed': String(f.sort === o[0]), text: o[1], onclick: function () { f.sort = o[0]; draw(); } });
+      }));
       listBox.replaceChildren.apply(listBox, rows.length ? rows.map(function (s) {
         return h('li', {}, h('a', { class: 'person', href: '#/students/' + encodeURIComponent(s.id) },
           h('span', { class: 'person-main' }, h('span', { class: 'person-name', text: s.name }),
-            h('span', { class: 'item-sub', text: [s.level, s.contact].filter(Boolean).join(', ') })),
+            h('span', { class: 'item-sub', text: [s.level, s.contact].filter(Boolean).join(', ') }),
+            paidUntilOf(s) ? h('span', { class: 'item-sub', text: 'вистачить до ' + fmtDayMonth(paidUntilOf(s)) }) : null),
           balanceBadge(balanceOf(s.id), s.status)));
       }) : [h('li', { class: 'item-sub empty-row', text: q ? 'За цим іменем нікого не знайдено.' : (f.status === 'active' ? 'Активних учнів ще немає. Натисни «Новий учень».' : 'Тут поки порожньо.') })]);
       segBox.replaceChildren.apply(segBox, Object.keys(STUDENT_STATUS).map(function (k) {
@@ -987,6 +1059,7 @@
           h('button', { class: 'btn ghost', type: 'button', text: 'Підсумки місяця', onclick: function () { openSummaries(summaryTarget(todayStr()) || todayStr().slice(0, 7)); } }),
           h('button', { class: 'btn primary', type: 'button', text: 'Новий учень', onclick: function () { openStudentForm(null); } }))),
       h('div', { class: 'toolbar' }, segBox, search),
+      sumLine, h('div', { class: 'sortbar' }, h('span', { class: 'item-sub', text: 'Сортувати:' }), sortBox),
       listBox);
   }
 
@@ -1130,28 +1203,50 @@
     row('Тривалість заняття', st.lesson_duration_min ? st.lesson_duration_min + ' хв' : null);
     row('Нотатки', st.notes ? h('span', { class: 'prewrap', text: st.notes }) : null);
 
+    var nowMs = Date.now(), nextL = null, lastL = null;
+    if (S.card && S.card.id === st.id) S.card.lessons.forEach(function (l) {
+      var ms = new Date(l.starts_at).getTime();
+      if (l.kind !== 'lesson' && l.kind != null) return;
+      if (l.status === 'planned' && ms >= nowMs && (!nextL || ms < new Date(nextL.starts_at).getTime())) nextL = l;
+      if (l.status === 'done' && ms <= nowMs && (!lastL || ms > new Date(lastL.starts_at).getTime())) lastL = l;
+    });
+    var fmtL = function (l) { var ms = new Date(l.starts_at).getTime(); return shortDate.format(new Date(ms)) + ', ' + fmtTime(ms); };
+    var facts = h('dl', { class: 'info facts' });
+    function fact(label, value) { if (value) facts.append(h('dt', { text: label }), h('dd', { text: value })); }
+    if (st.status === 'active') fact('Наступне заняття', nextL ? fmtL(nextL) : (S.card && S.card.id === st.id ? 'не заплановано' : null));
+    fact('Останнє заняття', lastL ? fmtL(lastL) : null);
+    var puCard = paidUntilOf(st);
+    fact('Вистачить приблизно до', puCard ? fmtDayMonth(puCard) + '.' + puCard.slice(0, 4) : null);
+    fact('Ціна за заняття', st.current_price ? money(st.current_price) : null);
     var balBox;
     if (!b || (b.lessons_bought === 0 && b.lessons_used === 0)) balBox = h('p', { class: 'item-sub', text: 'Оплат і занять ще немає.' });
     else balBox = h('div', {},
       b.balance < 0 ? h('div', { class: 'danger-text big-bal' }, icon('alert'), balanceText(b.balance)) : h('div', { class: 'big-bal', text: balanceText(b.balance) }),
       h('div', { class: 'item-sub', text: 'Куплено ' + b.lessons_bought + ', використано ' + b.lessons_used + (b.opening_balance ? ', початковий залишок ' + (b.opening_balance > 0 ? '+' : '−') + Math.abs(b.opening_balance) : '') }));
 
+    balBox = h('div', {}, balBox, facts.children.length ? facts : null,
+      st.status === 'active' && b && b.balance <= S.settings.soon_pay_threshold && (b.lessons_bought > 0 || b.lessons_used > 0) ? h('div', { class: 'item-actions left' }, h('button', { class: 'btn ghost small', type: 'button', text: 'Скопіювати нагадування', onclick: function () { copyReminder(st); } })) : null);
+
     var hist;
     if (!S.card || S.card.id !== st.id) hist = [h('p', { class: 'skeleton', text: 'Завантаження історії…' })];
     else {
       var pkgMap = {}; S.card.packages.forEach(function (x) { pkgMap[x.id] = x; });
-      var pays = S.card.payments.length
-        ? h('ul', { class: 'list' }, S.card.payments.map(function (p) { return paymentRow(p, pkgMap[p.package_id], false); }))
+      var allP = S.card.payments, shownP = S.cardAllPay ? allP : allP.slice(0, 3);
+      var pays = allP.length
+        ? h('div', {}, h('ul', { class: 'list' }, shownP.map(function (p) { return paymentRow(p, pkgMap[p.package_id], false); })),
+            allP.length > 3 ? h('button', { class: 'btn ghost small more-btn', type: 'button', text: S.cardAllPay ? 'Згорнути' : 'Показати всі (' + allP.length + ')', onclick: function () { S.cardAllPay = !S.cardAllPay; render(); } }) : null)
         : h('p', { class: 'item-sub', text: 'Оплат ще немає.' });
-      var les = S.card.lessons.length
-        ? h('ul', { class: 'list' }, S.card.lessons.map(function (l) {
+      var pastL = S.card.lessons.filter(function (l) { return !(l.status === 'planned' && new Date(l.starts_at).getTime() > nowMs); });
+      var shownL = S.cardAll ? pastL : pastL.slice(0, 5);
+      var les = pastL.length
+        ? h('div', {}, h('ul', { class: 'list' }, shownL.map(function (l) {
             var ms = new Date(l.starts_at).getTime();
             return h('li', { class: 'item' },
               h('div', { class: 'item-main' },
                 h('div', { text: fmtDMY(kyivDateStr(ms)) + ', ' + fmtTime(ms) }),
                 l.notes ? h('div', { class: 'item-sub prewrap', text: l.notes }) : null),
               h('span', { class: 'tag ' + ((STATUS[l.status] || {}).cls || 'muted'), text: LESSON_STATUS_TEXT[l.status] || l.status }));
-          }))
+          })), pastL.length > 5 ? h('button', { class: 'btn ghost small more-btn', type: 'button', text: S.cardAll ? 'Згорнути' : 'Показати всі (' + pastL.length + ')', onclick: function () { S.cardAll = !S.cardAll; render(); } }) : null)
         : h('p', { class: 'item-sub', text: 'Занять ще немає.' });
       hist = [
         renderStudentSummaries(st),
@@ -1417,10 +1512,28 @@
           : h('p', { class: 'item-sub', text: 'Кількість уроків у школі за цей місяць ще не вказана. Вона йде в «Статистику» й рекап, не в податок.' }))
       ];
     }
+    var curYm = todayStr().slice(0, 7), expect = [];
+    S.students.forEach(function (st) {
+      var bl = balanceOf(st.id);
+      if (st.status !== 'active' || !bl || !(bl.lessons_bought > 0 || bl.lessons_used > 0)) return;
+      var pu = bl.balance > 0 ? paidUntil(st, bl.balance, Date.now()) : null;
+      if (bl.balance <= 0) expect.push({ st: st, b: bl, key: '0000', note: bl.balance < 0 ? 'борг ' + Math.abs(bl.balance) + ' ' + lessonsWord(bl.balance) : 'оплачені заняття закінчились' });
+      else if (pu && pu.slice(0, 7) <= curYm) expect.push({ st: st, b: bl, key: pu, note: 'вистачить до ' + fmtDayMonth(pu) });
+    });
+    expect.sort(function (a, b) { return a.key.localeCompare(b.key); });
+    var expectBox = expect.length ? h('section', { class: 'section' },
+      h('div', { class: 'section-head' }, h('h2', { text: 'Очікую цього місяця' }), h('span', { class: 'count', text: expect.length })),
+      h('ul', { class: 'list' }, expect.map(function (x) {
+        return h('li', { class: 'item' }, h('div', { class: 'item-main' }, h('a', { class: 'pay-who', href: '#/students/' + encodeURIComponent(x.st.id), text: x.st.name }), h('div', { class: 'item-sub', text: x.note })),
+          h('div', { class: 'item-actions' },
+            h('button', { class: 'btn ghost small', type: 'button', text: 'Нагадати', onclick: function () { copyReminder(x.st); } }),
+            h('button', { class: 'btn primary small', type: 'button', text: 'Оплатив', onclick: function () { openPaymentForm({ studentId: x.st.id }); } })));
+      })),
+      h('p', { class: 'hint', text: 'Прогноз приблизний: рахується за постійним розкладом, без урахування скасувань і переносів. Сума не прогнозується, бо пакети різного розміру.' })) : null;
     return page(
       h('div', { class: 'page-head' }, h('h1', { text: 'Оплати' }),
         h('button', { class: 'btn primary', type: 'button', text: 'Нова оплата', onclick: function () { openPaymentForm({}); } })),
-      nav, body);
+      expectBox, nav, body);
   }
 
   // ================= Крок 4: розклад =================
@@ -1988,6 +2101,8 @@
   function aggMonths(rows) {
     var a = {};
     AGG_KEYS.forEach(function (k) { a[k] = round2(rows.reduce(function (s, r) { return s + (Number(r[k]) || 0); }, 0)); });
+    a.lessons_total = a.lessons_done + a.school_lessons;               // усі проведені: репетиторство + школа
+    a.hours_total = round2(a.hours + a.school_hours);
     a.hourly_rate = a.hours > 0 ? roundAway(a.tutor_net / a.hours) : null;   // ставка лише за репетиторство
     return a;
   }
@@ -2134,10 +2249,10 @@
     var kpis = h('div', { class: 'kpi-grid' },
       kpi('Дохід від учнів', money(c.income), c.payments_count + ' ' + plural(c.payments_count, 'оплата', 'оплати', 'оплат')),
       c.other_income > 0 ? kpi('Інший дохід (школа)', money(c.other_income)) : null,
-      c.school_lessons > 0 ? kpi('Уроки в школі', String(c.school_lessons), '≈ ' + fmtHours(c.school_hours) + '. Разом із репетиторством заняттями: ' + (c.lessons_done + c.school_lessons)) : null,
+      kpi('Проведено занять', String(c.lessons_total), c.school_lessons > 0 ? 'репетиторство ' + c.lessons_done + ' · школа ' + c.school_lessons : null),
       kpi('Чистий прибуток', money(c.net_profit), c.other_income > 0 ? 'з усіх доходів, після витрат і податку' : null),
       kpi('Реальна ставка', fmtRate(c.hourly_rate), S.statType === 'month' ? 'за місяць вона стрибає: оплати надходять нерівномірно, точніше видно за квартал' : (c.other_income > 0 ? 'лише за репетиторство' : null)),
-      kpi('Години', fmtHours(c.hours), 'проведено ' + c.lessons_done + ', згоріло ' + c.lessons_lost + ', скасовано ' + c.lessons_cancelled));
+      kpi('Години', fmtHours(c.hours_total), (c.school_lessons > 0 ? 'репетиторство ' + fmtHours(c.hours) + ' · школа ' + fmtHours(c.school_hours) + '. ' : '') + 'У репетиторстві згоріло ' + c.lessons_lost + ', скасовано ' + c.lessons_cancelled));
     var bridge = h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'З чого складається прибуток' })),
       h('dl', { class: 'bridge' },
         h('dt', { text: c.other_income > 0 ? 'Дохід від учнів' : 'Дохід' }), h('dd', { text: money(c.income) }),
@@ -2168,9 +2283,8 @@
 
     // порівняння з минулим періодом
     var prevWord = { month: 'минулим місяцем', quarter: 'минулим кварталом', year: 'минулим роком' }[S.statType];
-    var cmpRows = [['Дохід від учнів', 'income', money], ['Проведені заняття', 'lessons_done', function (x) { return String(x); }], ['Чистий прибуток', 'net_profit', money], ['Реальна ставка', 'hourly_rate', fmtRate]];
+    var cmpRows = [['Дохід від учнів', 'income', money], ['Проведені заняття', 'lessons_total', function (x) { return String(x); }], ['Чистий прибуток', 'net_profit', money], ['Реальна ставка', 'hourly_rate', fmtRate]];
     if (m.hasPrev && (c.other_income > 0 || m.prev.other_income > 0)) cmpRows.splice(1, 0, ['Дохід зі школи', 'other_income', money]);
-    if (m.hasPrev && (c.school_lessons > 0 || m.prev.school_lessons > 0)) cmpRows.splice(cmpRows.length - 2, 0, ['Уроки в школі', 'school_lessons', function (x) { return String(x); }]);
     var cmp = h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Порівняння з ' + prevWord }), m.hasPrev ? h('span', { class: 'count', text: m.prevLabel }) : null),
       m.hasPrev ? h('div', { class: 'cmp' }, cmpRows.map(function (r) {
         return h('div', { class: 'cmp-row' }, h('div', { class: 'cmp-name', text: r[0] }), h('div', { class: 'cmp-cur', text: r[2](c[r[1]]) }),
@@ -2284,15 +2398,16 @@
     });
     var written = {};
     (c.summaries || []).forEach(function (x) { if (x.text && String(x.text).trim()) written[x.month.slice(0, 7)] = true; });
-    var months = Object.keys(byMonth).sort().reverse();
+    var months = Object.keys(byMonth).sort().reverse(), allM = months.length;
+    if (!S.cardAllSum) months = months.slice(0, 3);
     return h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', { text: 'Підсумки місяців' })),
-      months.length ? h('ul', { class: 'list' }, months.map(function (ym) {
+      months.length ? h('div', {}, h('ul', { class: 'list' }, months.map(function (ym) {
         var x = byMonth[ym];
         return h('li', { class: 'item' },
           h('div', { class: 'item-main' }, h('div', { class: 'pay-title', text: monthYearName(ym) }), h('div', { class: 'item-sub', text: 'Проведено ' + x.done + ' ' + lessonsWord(x.done) + ', ' + fmtHours(x.minutes / 60) })),
           h('div', { class: 'item-actions' }, written[ym] || !summaryStale(ym) ? h('span', { class: 'tag ' + (written[ym] ? 'ok' : 'muted'), text: written[ym] ? 'написано' : 'не написано' }) : null,
             h('button', { class: 'btn ghost small', type: 'button', text: written[ym] ? 'Відкрити' : 'Написати', onclick: function () { openSummaryEditor(st.id, ym).catch(fail); } })));
-      })) : h('p', { class: 'item-sub', text: 'Проведених занять ще немає.' }));
+      })), allM > 3 ? h('button', { class: 'btn ghost small more-btn', type: 'button', text: S.cardAllSum ? 'Згорнути' : 'Показати всі (' + allM + ')', onclick: function () { S.cardAllSum = !S.cardAllSum; render(); } }) : null) : h('p', { class: 'item-sub', text: 'Проведених занять ще немає.' }));
   }
 
   // ================= Крок 8: Рекап року =================
@@ -2339,9 +2454,10 @@
 
     cards.push({ key: 'intro', lead: 'Твій рік у цифрах', big: year, lines: [partial ? 'Станом на ' + dmFmt.format(utcDate(today)) : 'Підсумок року'] });
 
-    var lessonLines = ['Це ' + fmtHours(c.hours) + ' з учнями'];
-    if (c.school_lessons > 0) lessonLines.push('І ще ' + c.school_lessons + ' ' + schoolWord(c.school_lessons) + ' у школі');
-    cards.push({ key: 'lessons', lead: 'Цього року ти провела', big: String(c.lessons_done), count: { value: c.lessons_done, fmt: 'int' }, unit: lessonsWord(c.lessons_done), lines: lessonLines });
+    var lessonLines = [];
+    if (c.school_lessons > 0) { lessonLines.push('Репетиторство: ' + c.lessons_done + ' ' + lessonsWord(c.lessons_done) + ' (' + fmtHours(c.hours) + ')'); lessonLines.push('Школа: ' + c.school_lessons + ' ' + schoolWord(c.school_lessons) + ' (' + fmtHours(c.school_hours) + ')'); }
+    else lessonLines.push('Це ' + fmtHours(c.hours) + ' з учнями');
+    cards.push({ key: 'lessons', lead: 'Цього року ти провела', big: String(c.lessons_total), count: { value: c.lessons_total, fmt: 'int' }, unit: lessonsWord(c.lessons_total), lines: lessonLines });
 
     var incLines = [];
     if (sm.months.length > 1 && sm.best && sm.best.income > 0) incLines.push('Найкращий місяць: ' + monthName(sm.best.ym) + ', ' + money(sm.best.income));
@@ -2406,7 +2522,7 @@
 
     var prev = sm.prev, prevYear = String(Number(year) - 1);
     var fig = function (label, value, key) { return { label: label, value: value, delta: prev ? pctChange(c[key], prev[key]) : null }; };
-    cards.push({ key: 'final', lead: 'Твій ' + year + ' у підсумку', figures: [fig('Занять', String(c.lessons_done), 'lessons_done'), { label: 'Годин', value: fmtHours(c.hours).replace(' год', '') }, fig('Дохід', money(c.income), 'income'), fig('Чистий прибуток', money(c.net_profit), 'net_profit')], prevYear: prev ? prevYear : null, partial: partial });
+    cards.push({ key: 'final', lead: 'Твій ' + year + ' у підсумку', figures: [fig('Занять', String(c.lessons_total), 'lessons_total'), { label: 'Годин', value: fmtHours(c.hours_total).replace(' год', '') }, fig('Дохід', money(c.income), 'income'), fig('Чистий прибуток', money(c.net_profit), 'net_profit')], prevYear: prev ? prevYear : null, partial: partial });
     return { empty: false, year: year, partial: partial, cards: cards };
   }
 
@@ -2644,7 +2760,7 @@
     var actions = h('div', { class: 'slot-actions' });
     if (l.status === 'planned') {
       actions.append(actButton('primary small', 'Проведено', function () { return markDone(l); }, 'check'));
-      actions.append(h('button', { class: 'btn ghost small', type: 'button', text: 'Скасувати або перенести', onclick: function () { openCancelDialog(l).catch(fail); } }));
+      actions.append(h('button', { class: 'btn link', type: 'button', text: 'Скасувати або перенести', onclick: function () { openCancelDialog(l).catch(fail); } }));
       if (manage && !l.from_schedule) {
         actions.append(h('button', { class: 'btn link', type: 'button', text: 'Змінити', onclick: function () { openLessonForm({ edit: l }); } }));
         actions.append(h('button', { class: 'btn link', type: 'button', text: 'Видалити', onclick: function () { openDeleteLesson(l); } }));
@@ -2666,7 +2782,8 @@
     var left = lessons.filter(function (l) { return l.status === 'planned'; }).length;
     var head = h('div', { class: 'today-head' },
       h('h1', { text: 'Сьогодні' }),
-      h('p', { class: 'date-line', text: longDate.format(new Date(nowMs)) + (lessons.length ? '. Занять у плані: ' + left : '') }));
+      h('p', { class: 'date-line', text: longDate.format(new Date(nowMs)) }),
+      lessons.length ? h('p', { class: 'day-count' }, h('span', { class: 'big', text: String(lessons.length) }), h('span', { class: 'lbl', text: plural(lessons.length, 'заняття', 'заняття', 'занять') + ' сьогодні' + (left < lessons.length ? ', лишилось ' + left : '') })) : null);
     var body;
     if (!lessons.length) {
       var sub = S.nextLesson
@@ -2677,6 +2794,16 @@
       body = h('ul', { class: 'timeline' }, lessons.map(function (l) { return lessonSlot(l, upcoming && upcoming.id === l.id); }));
     }
     return h('section', { class: 'section', 'aria-labelledby': 'h-today' }, head, body);
+  }
+
+  function renderTomorrow() {
+    var list = (S.tomorrowLessons || []).filter(function (l) { return l.status === 'planned'; });
+    var nm = function (l) { return l.kind === 'consultation' ? l.guest_name + ' (консультація)' : ((S.studentMap[l.student_id] || {}).name || 'Учень'); };
+    return h('section', { class: 'section' },
+      h('div', { class: 'section-head' }, h('h2', { text: 'Завтра' }), list.length ? h('span', { class: 'count', text: list.length + ' ' + plural(list.length, 'заняття', 'заняття', 'занять') }) : null),
+      list.length ? h('ul', { class: 'list' }, list.map(function (l) {
+        return h('li', { class: 'item' }, h('div', { class: 'item-main', text: nm(l) }), h('span', { class: 'item-sub', text: fmtTime(new Date(l.starts_at).getTime()) }));
+      })) : h('p', { class: 'item-sub', text: 'Занять немає.' }));
   }
 
   function taskItem(t) {
@@ -2718,14 +2845,17 @@
     return h('section', { class: 'section' },
       h('div', { class: 'section-head' }, h('h2', { text: 'Не забути' }), tasks.length ? h('span', { class: 'count', text: tasks.length }) : null),
       tasks.length ? h('ul', { class: 'list' }, tasks.map(taskItem)) : h('p', { class: 'item-sub', text: 'Усе зроблено.' }),
-      h('div', { class: 'add-task' }, input, due, add));
+      h('details', { class: 'add-details' }, h('summary', { text: '+ Нове завдання' }), h('div', { class: 'add-task' }, input, due, add)));
   }
 
   function payItem(b, danger) {
-    var st = S.studentMap[b.student_id];
+    var st = S.studentMap[b.student_id], pu = paidUntilOf(st);
     return h('li', { class: 'item' },
-      h('div', { class: 'item-main' }, h('span', { text: st.name })),
-      danger ? h('span', { class: 'danger-text' }, icon('alert'), balanceText(b.balance)) : h('span', { class: 'item-sub', text: balanceText(b.balance) }));
+      h('div', { class: 'item-main' }, h('span', { text: st.name }),
+        h('div', { class: 'item-sub' }, danger ? h('span', { class: 'danger-text' }, icon('alert'), balanceText(b.balance)) : h('span', { text: balanceText(b.balance) + (pu ? ', вистачить до ' + fmtDayMonth(pu) : '') }))),
+      h('div', { class: 'item-actions' },
+        h('button', { class: 'btn ghost small', type: 'button', text: 'Нагадати', onclick: function () { copyReminder(st); } }),
+        h('button', { class: 'btn primary small', type: 'button', text: 'Оплатив', onclick: function () { openPaymentForm({ studentId: st.id }); } })));
   }
   function renderPayments() {
     var p = buildPayments(S);
@@ -2754,12 +2884,13 @@
 
   function renderSummary() {
     var m = S.month || {};
-    var income = Number(m.income) || 0, other = Number(m.other_income) || 0, done = Number(m.lessons_done) || 0;
+    var income = Number(m.income) || 0, other = Number(m.other_income) || 0, tut = Number(m.lessons_done) || 0, sch = Number(m.school_lessons) || 0, done = tut + sch;
     var monthName = new Intl.DateTimeFormat('uk-UA', { timeZone: TZ, month: 'long' }).format(new Date());
     return h('div', { class: 'summary', role: 'region', 'aria-label': 'Підсумок місяця' },
       h('span', {}, h('span', { class: 'big', text: money(income) }), h('span', { class: 'lbl', text: 'дохід від учнів, ' + monthName }),
         other > 0 ? h('span', { class: 'lbl note-small', text: '(разом зі школою: ' + money(income + other) + ')' }) : null),
-      h('span', {}, h('span', { class: 'big', text: String(done) }), h('span', { class: 'lbl', text: plural(done, 'проведене заняття', 'проведені заняття', 'проведених занять') })));
+      h('span', {}, h('span', { class: 'big', text: String(done) }), h('span', { class: 'lbl', text: plural(done, 'проведене заняття', 'проведені заняття', 'проведених занять') }),
+        sch > 0 ? h('span', { class: 'lbl note-small', text: '(репетиторство ' + tut + ' · школа ' + sch + ')' }) : null));
   }
 
   function topbar(withTools) {
@@ -2829,11 +2960,22 @@
       case 'recap': app.replaceChildren(renderRecap()); return;
       default: view = renderHome();
     }
-    app.replaceChildren(topbar(true), view);
+    app.replaceChildren(topbar(true), view, bottomNav());
+  }
+
+  function bottomNav() {
+    var cur = S.route.name === 'student' || S.route.name === 'summaries' ? 'students' : S.route.name;
+    var main = [['home', 'Головна', '#/'], ['schedule', 'Розклад', '#/schedule'], ['students', 'Учні', '#/students'], ['payments', 'Оплати', '#/payments']];
+    var more = [['expenses', 'Витрати', '#/expenses'], ['stats', 'Статистика', '#/stats'], ['settings', 'Налаштування', '#/settings']];
+    var moreActive = more.some(function (n) { return n[0] === cur; });
+    return h('nav', { class: 'bottom-nav', 'aria-label': 'Розділи' },
+      main.map(function (n) { return h('a', { class: 'bn-item', href: n[2], 'aria-current': cur === n[0] ? 'page' : null, text: n[1] }); }),
+      h('button', { class: 'bn-item', type: 'button', 'aria-expanded': String(!!S.moreOpen), 'aria-current': moreActive ? 'page' : null, text: 'Ще', onclick: function () { S.moreOpen = !S.moreOpen; render(); } }),
+      S.moreOpen ? h('div', { class: 'more-sheet' }, more.map(function (n) { return h('a', { href: n[2], 'aria-current': cur === n[0] ? 'page' : null, text: n[1] }); })) : null);
   }
 
   function renderHome() {
-    var left = h('div', {}, renderToday());
+    var left = h('div', {}, renderToday(), renderTomorrow());
     var right = h('div', {}, renderTasks(), renderPayments(), renderBirthdays());
     return h('main', { class: 'page' },
       S.error ? h('div', { class: 'msg err', role: 'alert', text: S.error }) : null,
