@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Відновлення з копії — Мій CRM</title>
+<style>
+  :root { --bg:#F2EDE4; --surface:#FAF7F1; --ink:#2A2E29; --muted:#686E65; --line:#D9D2C4; --green:#587562; --green-deep:#3E5646; --green-soft:#DCE5DB; --danger:#D4162E; --danger-soft:#FBE3E5; --warn:#8A6A1E; --warn-soft:#F3E8CC; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1B201C; --surface:#242A25; --ink:#E9E6DE; --muted:#A2A99F; --line:#38403A; --green:#8FAF95; --green-deep:#A9C6AE; --green-soft:#2B3A2F; --danger:#FF6B6B; --danger-soft:#3E2528; --warn:#E3C16F; --warn-soft:#3A3220; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-size: 2.2rem; margin: 0 0 6px; }
+  h2 { font-family: Georgia, "Times New Roman", serif; font-size: 1.4rem; margin: 28px 0 8px; }
+  p { margin: 8px 0; }
+  .muted { color: var(--muted); }
+  ol { padding-left: 1.3em; } li { margin: 6px 0; }
+  .box { background: var(--surface); border-radius: 16px; padding: 18px 20px; margin: 16px 0; }
+  .warn { background: var(--warn-soft); color: var(--warn); }
+  .danger { background: var(--danger-soft); color: var(--danger); }
+  .ok { background: var(--green-soft); color: var(--green-deep); }
+  button, .btn { min-height: 44px; padding: 0 18px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: var(--ink); font: inherit; font-weight: 500; cursor: pointer; }
+  button.primary { background: var(--green); color: #fff; border-color: transparent; }
+  button[disabled] { opacity: .5; cursor: default; }
+  :focus-visible { outline: 3px solid var(--green); outline-offset: 2px; }
+  input[type=file] { display: block; margin: 8px 0; max-width: 100%; }
+  textarea { width: 100%; min-height: 240px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: 13px/1.4 ui-monospace, Consolas, monospace; }
+  table { border-collapse: collapse; width: 100%; } td, th { padding: 6px 10px; border-top: 1px solid var(--line); text-align: left; } td:last-child, th:last-child { text-align: right; }
+  label.check { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; }
+  label.check input { width: 22px; height: 22px; margin-top: 2px; flex: none; accent-color: var(--green); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Відновлення з копії</h1>
+  <p class="muted">Ця сторінка нічого нікуди не надсилає: файл копії читається прямо у твоєму браузері й перетворюється на SQL, який ти вставляєш у Supabase.</p>
+
+  <div class="box warn">
+    <p><b>Коли це потрібно.</b> Якщо дані в базі зіпсовано або втрачено, або ти переїжджаєш у новий проєкт Supabase. Для звичайної роботи ця сторінка не потрібна.</p>
+  </div>
+
+  <h2>Як відновити</h2>
+  <ol>
+    <li>У Supabase відкрий проєкт, у який відновлюєш. Якщо це новий проєкт, спершу виконай там файли 01-12 зі схемою (їх зберігає Claude), а потім повертайся сюди.</li>
+    <li>Обери нижче файл копії (crm-backup-дата.json).</li>
+    <li>Натисни «Підготувати SQL», скопіюй результат у Supabase: SQL Editor, New query, Run.</li>
+    <li>Скрипт працює однією транзакцією й сам перевіряє кількість рядків у кожній таблиці: якщо щось не збігається, нічого не збережеться.</li>
+  </ol>
+
+  <div class="box">
+    <label for="file"><b>Файл копії</b></label>
+    <input id="file" type="file" accept=".json,application/json">
+    <div id="summary" hidden></div>
+    <div id="error" class="box danger" role="alert" hidden></div>
+  </div>
+
+  <div class="box" id="options" hidden>
+    <label class="check"><input type="checkbox" id="truncate"><span><b>Спершу видалити поточні дані</b><br><span class="muted">Увімкни, якщо відновлюєш у базу, де вже є записи (наприклад, після збою). Налаштування й дані входу не видаляються. Без цього скрипт зупиниться, якщо знайде такі самі записи.</span></span></label>
+    <div id="truncateWarn" class="box danger" hidden><b>Увага.</b> Усі учні, оплати, заняття, витрати, завдання, дати податків, підсумки місяців, інший дохід, уроки в школі й ЄСВ по роках у базі буде видалено перед відновленням. Робити це варто лише тоді, коли ти впевнена, що файл копії актуальний.</div>
+    <div class="row"><button class="primary" id="build" type="button">Підготувати SQL</button></div>
+  </div>
+
+  <div id="result" hidden>
+    <h2>Готовий SQL</h2>
+    <p class="muted" id="resultInfo"></p>
+    <div class="row">
+      <button id="copy" type="button">Скопіювати</button>
+      <button id="download" type="button">Завантажити як .sql</button>
+    </div>
+    <textarea id="sql" readonly aria-label="Згенерований SQL"></textarea>
+    <p class="muted">Файл містить персональні дані учнів. Не клади його в публічні місця, зокрема в репозиторій на GitHub.</p>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  // Порядок важливий: спершу ті, на які посилаються інші таблиці
+  var TABLES = ['students', 'packages', 'payments', 'lessons', 'expenses', 'tasks', 'tax_deadlines', 'monthly_summaries', 'other_income', 'school_lessons', 'esv_rates', 'schedule_pauses'];
+  var LABELS = { settings: 'Налаштування', students: 'Учні', packages: 'Пакети занять', payments: 'Оплати', lessons: 'Заняття', expenses: 'Витрати', tasks: 'Завдання', tax_deadlines: 'Дати податків', monthly_summaries: 'Підсумки місяців', other_income: 'Інший дохід', school_lessons: 'Уроки в школі', esv_rates: 'ЄСВ по роках', schedule_pauses: 'Паузи' };
+  var SKIP = { packages: ['price_per_lesson'] };   // обчислювана колонка: база сама її рахує
+  var CHUNK = 150;
+
+  function lit(v) {
+    if (v === null || v === undefined) return 'null';
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    if (typeof v === 'number') { if (!isFinite(v)) throw new Error('Некоректне число у файлі'); return String(v); }
+    if (typeof v === 'object') return "'" + JSON.stringify(v).replace(/'/g, "''") + "'::jsonb";
+    return "'" + String(v).replace(/'/g, "''") + "'";
+  }
+  function ident(c) { if (!/^[a-z_][a-z0-9_]*$/.test(c)) throw new Error('Підозріла назва колонки у файлі: ' + c); return c; }
+  function cols(table, rows) {
+    var skip = SKIP[table] || [], set = {};
+    rows.forEach(function (r) { Object.keys(r).forEach(function (k) { if (skip.indexOf(k) === -1) set[k] = 1; }); });
+    return Object.keys(set).map(ident);
+  }
+
+  // Перетворює файл копії на SQL. Чиста функція: нічого не читає зі сторінки, тому її легко перевірити.
+  function buildRestoreSql(backup, opts) {
+    opts = opts || {};
+    if (!backup || backup.app !== 'my-crm' || !backup.tables || typeof backup.tables !== 'object') throw new Error('Це не файл резервної копії цього CRM.');
+    var t = backup.tables, out = [], counts = {};
+    out.push('-- Відновлення з резервної копії ' + (backup.created_at || '') + '. Створено сторінкою restore.html.');
+    out.push('-- Усе виконується однією транзакцією: якщо щось не збігається, нічого не збережеться.');
+    out.push('begin;');
+    if (opts.truncate) {
+      out.push('\n-- Видалення поточних даних (налаштування лишаються)');
+      out.push('truncate table ' + ['monthly_summaries', 'tasks', 'expenses', 'lessons', 'payments', 'packages', 'students', 'tax_deadlines', 'other_income', 'school_lessons', 'esv_rates'].map(function (x) { return 'public.' + x; }).join(', ') + ' cascade;');
+    }
+    var st = (t.settings || [])[0];
+    if (st) {
+      var sets = Object.keys(st).filter(function (k) { return k !== 'id'; }).map(function (k) { return ident(k) + ' = ' + lit(st[k]); });
+      if (sets.length) { out.push('\n-- Налаштування'); out.push('update public.settings set ' + sets.join(', ') + ' where id = 1;'); }
+    }
+    var links = [];
+    TABLES.forEach(function (name) {
+      var rows = t[name];
+      if (!Array.isArray(rows)) return;
+      if (name !== 'schedule_pauses' || rows.length) counts[name] = rows.length;   // таблиця з файлу 15 може бути відсутня
+      if (!rows.length) return;
+      var c = cols(name, rows);
+      out.push('\n-- ' + LABELS[name] + ' (' + rows.length + ')');
+      for (var i = 0; i < rows.length; i += CHUNK) {
+        var part = rows.slice(i, i + CHUNK).map(function (r) {
+          var rr = r;
+          if (name === 'lessons' && r.rescheduled_to) { links.push([r.id, r.rescheduled_to]); rr = Object.assign({}, r, { rescheduled_to: null }); }   // посилання між заняттями додамо другим кроком
+          return '  (' + c.map(function (k) { return lit(rr[k]); }).join(', ') + ')';
+        });
+        out.push('insert into public.' + name + ' (' + c.join(', ') + ') values\n' + part.join(',\n') + ';');
+      }
+    });
+    if (links.length) {
+      out.push('\n-- Звʼязки «перенесено на» між заняттями');
+      links.forEach(function (l) { out.push('update public.lessons set rescheduled_to = ' + lit(l[1]) + ' where id = ' + lit(l[0]) + ';'); });
+    }
+    // перевірка кількостей
+    var checks = Object.keys(counts).map(function (n) { return "(select count(*) from public." + n + ') = ' + counts[n]; });
+    out.push('\n-- Перевірка: кількість рядків у кожній таблиці має збігатися з файлом');
+    out.push('do $$ begin\n  if not (' + checks.join('\n      and ') + ') then\n    raise exception \'Кількості рядків не збігаються з файлом копії. Нічого не збережено.\';\n  end if;\nend $$;');
+    out.push('\ncommit;');
+    return { sql: out.join('\n') + '\n', counts: counts, created_at: backup.created_at || null };
+  }
+  window.buildRestoreSql = buildRestoreSql;
+
+  // ---------- екран ----------
+  var $ = function (id) { return document.getElementById(id); };
+  var parsed = null, lastSql = '';
+  function show(el, on) { el.hidden = !on; }
+  function fail(msg) { $('error').textContent = msg; show($('error'), true); show($('summary'), false); show($('options'), false); show($('result'), false); parsed = null; }
+  $('file').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    show($('error'), false); show($('result'), false);
+    if (!f) return;
+    var fr = new FileReader();
+    fr.onerror = function () { fail('Не вдалося прочитати файл.'); };
+    fr.onload = function () {
+      try {
+        parsed = JSON.parse(fr.result);
+        if (!parsed || parsed.app !== 'my-crm' || !parsed.tables) throw new Error('Це не файл резервної копії цього CRM.');
+      } catch (e) { fail(e && e.message && e.message.indexOf('JSON') === -1 ? e.message : 'Файл пошкоджений або це не файл копії: не вдалося його прочитати.'); return; }
+      var rows = ['settings'].concat(TABLES).filter(function (n) { return Array.isArray(parsed.tables[n]); }).map(function (n) { return '<tr><td>' + LABELS[n] + '</td><td>' + parsed.tables[n].length + '</td></tr>'; });
+      var when = parsed.created_at ? new Date(parsed.created_at).toLocaleString('uk-UA') : 'невідомо';
+      $('summary').innerHTML = '<p class="ok box"><b>Копію прочитано.</b> Створена: ' + when.replace(/</g, '&lt;') + '</p><table><thead><tr><th>Що</th><th>Записів</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>';
+      show($('summary'), true); show($('options'), true);
+    };
+    fr.readAsText(f);
+  });
+  $('truncate').addEventListener('change', function () { show($('truncateWarn'), this.checked); });
+  $('build').addEventListener('click', function () {
+    if (!parsed) return;
+    try {
+      var r = buildRestoreSql(parsed, { truncate: $('truncate').checked });
+      lastSql = r.sql; $('sql').value = r.sql;
+      var total = Object.keys(r.counts).reduce(function (s, k) { return s + r.counts[k]; }, 0);
+      $('resultInfo').textContent = 'Рядків для відновлення: ' + total + '. ' + ($('truncate').checked ? 'Поточні дані буде спершу видалено.' : 'Поточні дані не видаляються.');
+      show($('result'), true); $('sql').focus(); $('sql').select();
+    } catch (e) { fail(e.message || 'Не вдалося підготувати SQL.'); }
+  });
+  $('copy').addEventListener('click', function () {
+    var b = this;
+    function done() { b.textContent = 'Скопійовано'; setTimeout(function () { b.textContent = 'Скопіювати'; }, 2000); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(lastSql).then(done, function () { $('sql').select(); document.execCommand('copy'); done(); });
+    else { $('sql').select(); document.execCommand('copy'); done(); }
+  });
+  $('download').addEventListener('click', function () {
+    var a = document.createElement('a'), url = URL.createObjectURL(new Blob([lastSql], { type: 'application/sql' }));
+    a.href = url; a.download = 'crm-restore.sql'; document.body.append(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  });
+})();
+</script>
+</body>
+</html>
