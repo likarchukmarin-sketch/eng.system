@@ -140,6 +140,7 @@ nav.bottom[hidden]{display:none}
 var CONFIG={
   SUPABASE_URL:"https://sjipzqhldjfrjcwunzez.supabase.co",
   ANON_KEY:"sb_publishable_YxHoX0rwCnE5yLZE_8H1Sg_yCFJggcr",   // публічний ключ (anon / publishable), НЕ service_role
+  CHAT_URL:"https://t.me/likarchuk",         // чат з Мариною (один для всіх; індивідуальний chat_url у CRM має пріоритет)
   OFFER_URL:""                              // посилання на публічну оферту
 };
 /* ========================================= */
@@ -267,7 +268,6 @@ function render(){
   if(nl){h+='<b>'+esc(cap(fmt(nl.starts_at,{weekday:"long",day:"numeric",month:"long",hour:"2-digit",minute:"2-digit"})))+'</b><div class="l" style="color:var(--muted);font-size:12px;margin-top:2px">за твоїм часом</div>'}
   else h+='<b>Поки не заплановано</b><div class="l" style="color:var(--muted);font-size:12px;margin-top:2px">Напиши Марині, щоб домовитись про час</div>';
   h+='</div>';
-  if(nl&&s.zoom_url)h+='<a class="btn" href="'+safeUrl(s.zoom_url)+'" target="_blank" rel="noopener noreferrer">Zoom ↗</a>';
   h+='</div></div>';
 
   if(b&&b.left<=2){h+='<div class="card warnbox" style="margin-top:12px"><div><b>'+(b.left<=0?"Пакет закінчився":"Пакет скоро закінчується")+'</b><div style="color:var(--muted);font-size:14px">Щоб заняття не зупинялись, напиши Марині про оплату наступного пакета.</div></div></div>'}
@@ -280,7 +280,9 @@ function render(){
   if(todo)h+='<div class="card todo" style="margin-top:12px"><div class="todo-h">Що зробити зараз</div>'+todo+'</div>';
 
   var btns="";
-  if(s.chat_url)btns+='<a class="btn ghost" href="'+safeUrl(s.chat_url)+'" target="_blank" rel="noopener noreferrer">Чат з Мариною ↗</a>';
+  if(s.zoom_url)btns+='<a class="btn" href="'+safeUrl(s.zoom_url)+'" target="_blank" rel="noopener noreferrer">Zoom ↗</a>';
+  var chatU=s.chat_url||CONFIG.CHAT_URL;
+  if(chatU)btns+='<a class="btn ghost" href="'+safeUrl(chatU)+'" target="_blank" rel="noopener noreferrer">Чат з Мариною ↗</a>';
   if(s.materials_url)btns+='<a class="btn ghost" href="'+safeUrl(s.materials_url)+'" target="_blank" rel="noopener noreferrer">Усі матеріали ↗</a>';
   if(btns)h+='<div class="btnrow">'+btns+'</div>';
   h+='</section>';
