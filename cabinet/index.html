@@ -173,6 +173,10 @@ function showState(t,sub){
 }
 
 /* ----- слова ----- */
+var VOICE=null;
+function pickVoice(){try{var v=speechSynthesis.getVoices()||[];VOICE=v.filter(function(x){return /google us english/i.test(x.name)})[0]||v.filter(function(x){return x.lang==="en-US"&&/(natural|enhanced|premium|samantha|ava|aria|jenny)/i.test(x.name)})[0]||v.filter(function(x){return x.lang==="en-US"})[0]||null}catch(e){}}
+try{pickVoice();speechSynthesis.onvoiceschanged=pickVoice}catch(e){}
+function say(t){try{speechSynthesis.cancel();var u=new SpeechSynthesisUtterance(t);u.lang="en-US";if(VOICE)u.voice=VOICE;u.rate=.9;speechSynthesis.speak(u)}catch(e){}}
 function wordsDoneToday(w){return w.last_correct_on===todayUTC()}
 function pool(){
   var p=(D.words||[]).filter(function(w){return mode==="learn"?(!w.known&&!wordsDoneToday(w)):w.known});
@@ -181,7 +185,7 @@ function pool(){
 function dots(w){var n=Math.min(w.streak||0,3),s="";for(var i=0;i<3;i++)s+=i<n?"●":"○";return s}
 function renderWords(){
   var all=D.words||[];
-  if(!all.length){$("words-box").innerHTML='<div class="card empty">Слова з уроків з\'являться тут. Марина додає їх після занять.</div>';return}
+  if(!all.length){$("words-box").innerHTML='<div class="card empty">Слова з уроків з\'являться тут. Марина додає їх після занять, а ти можеш додавати свої.</div><details class="arch addw"><summary>＋ Додати своє слово</summary><div class="card" style="margin-top:8px"><input class="srch" id="aw-en" maxlength="80" placeholder="Слово або фраза (English)"><input class="srch" id="aw-uk" maxlength="120" placeholder="Переклад"><input class="srch" id="aw-ex" maxlength="200" placeholder="Приклад або питання з цим словом (необов\'язково)"><button class="btn" id="aw-go" type="button" style="margin-top:12px">Додати</button></div></details>';bindAdd();return}
   var known=all.filter(function(w){return w.known}).length;
   var learnLeft=all.filter(function(w){return !w.known&&!wordsDoneToday(w)}).length;
   var p=pool();
@@ -192,11 +196,12 @@ function renderWords(){
   }else{
     var w=p[idx];
     h+='<div class="cnt">'+(idx+1)+' з '+p.length+' · '+dots(w)+'</div>';
-    h+='<div class="card fc" id="fc">'+(flip?'<div class="t">'+esc(w.uk)+'</div>'+(w.example?'<div class="ex">'+esc(w.example)+'</div>':'')+'<div class="h">натисни, щоб повернути</div>':'<div class="w">'+esc(w.en)+'</div><button class="spk" id="spk" type="button" aria-label="Вимова">🔊</button><div class="h">натисни, щоб побачити переклад</div>')+'</div>';
+    h+='<div class="card fc" id="fc">'+(flip?'<div class="t">'+esc(w.uk)+'</div>'+(w.example?'<div class="ex">'+esc(w.example)+'</div><button class="spk" id="spk2" type="button" aria-label="Вимова прикладу">🔊</button>':'')+'<div class="h">натисни, щоб повернути</div>':'<div class="w">'+esc(w.en)+'</div><button class="spk" id="spk" type="button" aria-label="Вимова">🔊</button><div class="h">натисни, щоб побачити переклад</div>')+'</div>';
     h+='<div class="acts">'+(mode==="learn"?'<button class="btn ghost" id="no">Ще не знаю</button><button class="btn" id="yes">Знаю ✓</button>':'<button class="btn ghost" id="next">Далі →</button>')+'</div>';
     if(mode==="learn")h+='<div class="hint2">Слово вважається вивченим після 3 правильних відповідей у різні дні.</div>';
   }
   h+='<input class="srch" id="srch" type="search" placeholder="Знайти слово у своєму словнику"><div class="card wl srch-r" id="wl" style="display:none"></div>';
+  h+='<details class="arch addw"><summary>＋ Додати своє слово</summary><div class="card" style="margin-top:8px"><input class="srch" id="aw-en" maxlength="80" placeholder="Слово або фраза (English)"><input class="srch" id="aw-uk" maxlength="120" placeholder="Переклад"><input class="srch" id="aw-ex" maxlength="200" placeholder="Приклад або питання з цим словом (необов\'язково)"><button class="btn" id="aw-go" type="button" style="margin-top:12px">Додати</button></div></details>';
   $("words-box").innerHTML=h;
   bindWords(p);
 }
@@ -204,7 +209,9 @@ function bindWords(p){
   var b=$("words-box");
   Array.prototype.forEach.call(b.querySelectorAll(".tabs button"),function(x){x.onclick=function(){mode=x.getAttribute("data-m");idx=0;flip=false;renderWords()}});
   if($("fc"))$("fc").onclick=function(){flip=!flip;renderWords()};
-  if($("spk"))$("spk").onclick=function(e){e.stopPropagation();try{speechSynthesis.cancel();var u=new SpeechSynthesisUtterance(p[idx].en);u.lang="en-US";u.rate=.85;speechSynthesis.speak(u)}catch(x){}};
+  if($("spk"))$("spk").onclick=function(e){e.stopPropagation();say(p[idx].en)};
+  if($("spk2"))$("spk2").onclick=function(e){e.stopPropagation();say(p[idx].example)};
+  bindAdd();
   if($("yes"))$("yes").onclick=function(){answer(p[idx],true)};
   if($("no"))$("no").onclick=function(){answer(p[idx],false)};
   if($("next"))$("next").onclick=function(){idx=(idx+1)%p.length;flip=false;renderWords()};
@@ -214,6 +221,18 @@ function bindWords(p){
     var r=(D.words||[]).filter(function(w){return w.en.toLowerCase().indexOf(q)>-1||w.uk.toLowerCase().indexOf(q)>-1});
     box.style.display="block";
     box.innerHTML=r.length?r.map(function(w){return '<div class="row"><span><span class="en">'+esc(w.en)+'</span> <span style="color:var(--muted)">· '+esc(w.uk)+'</span></span><span class="st pill '+(w.known?"ok":"")+'">'+(w.known?"вивчено":dots(w))+'</span></div>'}).join(""):'<div class="empty">Нічого не знайдено</div>';
+  };
+}
+function bindAdd(){
+  var g=$("aw-go");if(!g)return;
+  g.onclick=function(){
+    var en=$("aw-en").value.trim(),uk=$("aw-uk").value.trim(),ex=$("aw-ex").value.trim();
+    if(!en||!uk){toast("Заповни слово і переклад.");return}
+    g.disabled=true;
+    rpc("cabinet_add_word",{p_code:CODE,p_en:en,p_uk:uk,p_example:ex}).then(function(r){
+      if(r&&r.id){D.words=D.words||[];D.words.push({id:r.id,en:r.en,uk:r.uk,example:r.example,lesson_id:null,streak:0,known:false,last_correct_on:null});mode="learn";idx=0;flip=false;renderWords();updateStats();toast("Слово додано ✓")}
+      else{g.disabled=false;toast("Таке слово вже є або сталася помилка.")}
+    }).catch(function(){g.disabled=false;toast("Не вдалося зберегти. Спробуй ще раз.")});
   };
 }
 function answer(w,ok){
@@ -242,7 +261,7 @@ function lessonHtml(l){
   return h+'</div>';
 }
 function renderLessons(){
-  var ls=D.lessons||[];
+  var ls=(D.lessons||[]).filter(function(l){return (l.items||[]).length>0});
   if(!ls.length)return '<div class="card empty">Тут з\'являтимуться ваші заняття: коментарі, матеріали й домашнє.</div>';
   var h='<div class="card">'+ls.slice(0,3).map(lessonHtml).join("");
   var rest=ls.slice(3);
@@ -299,8 +318,12 @@ function render(){
   h+='<section class="sec" id="words"><h2>Слова на сьогодні</h2><div id="words-box"></div></section>';
 
   var pk=D.packages||[];
-  h+='<section class="sec" id="pay"><h2>Оплати</h2><div class="card">'+(pk.length?pk.map(function(p){
-    return '<div class="row"><span>'+esc(fmt(p.purchased_at+"T12:00:00Z",{day:"numeric",month:"long",year:"numeric"}))+' · '+esc(p.lessons_count)+' '+plural(p.lessons_count,"заняття","заняття","занять")+'</span><span>'+esc(Number(p.total_price).toLocaleString("uk-UA"))+' грн <span class="pill '+(p.paid_at?"ok":"warn")+'">'+(p.paid_at?"оплачено":"очікує оплати")+'</span></span></div>'}).join(""):'<div class="empty">Оплат поки немає.</div>')+'</div></section>';
+  h+='<section class="sec" id="pay"><h2>Оплата</h2><div class="card">'+(pk.length?(function(p){
+    var pd=esc(fmt(p.purchased_at+"T12:00:00Z",{day:"numeric",month:"long",year:"numeric"}));
+    var r='<div class="row"><span>Остання оплата</span><span>'+pd+'</span></div>';
+    r+='<div class="row"><span>Пакет</span><span>'+esc(p.lessons_count)+' '+plural(p.lessons_count,"заняття","заняття","занять")+' · '+esc(Number(p.total_price).toLocaleString("uk-UA"))+' грн <span class="pill '+(p.paid_at?"ok":"warn")+'">'+(p.paid_at?"оплачено":"очікує оплати")+'</span></span></div>';
+    if(b)r+='<div class="row"><span>Використано</span><span>'+esc(b.used)+' з '+esc(b.bought)+' · залишилось '+esc(b.left)+'</span></div>';
+    return r})(pk[0]):'<div class="empty">Тут буде остання оплата.</div>')+'</div></section>';
 
   var sm=D.summaries||[];
   h+='<section class="sec" id="progress"><h2>Прогрес</h2><div class="card">'+(sm.length?sm.map(function(m){return '<div class="mon"><b>'+esc(monthLabel(String(m.month).slice(0,7)))+'</b><br><span style="color:var(--muted)">'+esc(m.text)+'</span></div>'}).join(""):'<div class="empty">Підсумки місяців з\'являться тут.</div>')+'</div></section>';
@@ -347,6 +370,7 @@ function demoRpc(name,a){
     if(name==="cabinet_get")return res(DEMO_DATA);
     if(name==="cabinet_set_goal")return res(true);
     if(name==="cabinet_word_answer"){var w=DEMO_DATA.words.filter(function(x){return x.id===a.p_word_id})[0];var st=a.p_correct?Math.min((w.streak||0)+1,3):0;return res({streak:st,known:st>=3})}
+    if(name==="cabinet_add_word")return res({id:"n"+Date.now(),en:a.p_en,uk:a.p_uk,example:a.p_example});
     res(null)},200)});
 }
 function buildDemo(){
