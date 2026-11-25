@@ -19,12 +19,12 @@
 </script>
 <style>
   /* Шрифти Kyiv*Type лежать у папці fonts поруч з index.html; без них працюють запасні */
-  @font-face { font-family: "KyivType Sans"; src: url("fonts/KyivTypeSans-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-  @font-face { font-family: "KyivType Sans"; src: url("fonts/KyivTypeSans-Medium.woff2") format("woff2"); font-weight: 500 700; font-display: swap; }
-  @font-face { font-family: "KyivType Serif"; src: url("fonts/KyivTypeSerif-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-  @font-face { font-family: "KyivType Serif"; src: url("fonts/KyivTypeSerif-Medium.woff2") format("woff2"); font-weight: 500 700; font-display: swap; }
-  @font-face { font-family: "KyivType Titling"; src: url("fonts/KyivTypeTitling-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-  @font-face { font-family: "KyivType Titling"; src: url("fonts/KyivTypeTitling-Medium.woff2") format("woff2"); font-weight: 500 700; font-display: swap; }
+  @font-face { font-family: "KyivType Sans"; src: url("KyivTypeSans-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "KyivType Sans"; src: url("KyivTypeSans-Medium.woff2") format("woff2"); font-weight: 500 700; font-display: swap; }
+  @font-face { font-family: "KyivType Serif"; src: url("KyivTypeSerif-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "KyivType Serif"; src: url("KyivTypeSerif-Medium.woff2") format("woff2"); font-weight: 500 700; font-display: swap; }
+  @font-face { font-family: "KyivType Titling"; src: url("KyivTypeTitling-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "KyivType Titling"; src: url("KyivTypeTitling-Medium.woff2") format("woff2"); font-weight: 500 700; font-display: swap; }
   :root {
     --bg: #F2EDE4;
     --surface: #FAF7F1;
@@ -821,6 +821,16 @@
     if (l.kind === 'consultation') {
       must(await sb.from('lessons').update({ starts_at: new Date(ts).toISOString() }).eq('id', l.id));
     } else {
+      // Якщо переношу заняття назад на час, з якого його щойно перенесли, не множимо записи: просто повертаємо старе на місце
+      var prevRes = await sb.from('lessons').select('*').eq('rescheduled_to', l.id).eq('status', 'rescheduled');
+      var prev = prevRes.error ? null : (prevRes.data || []).filter(function (x) { return new Date(x.starts_at).getTime() === ts; })[0];
+      if (prev) {
+        must(await sb.from('lessons').delete().eq('id', l.id));
+        must(await sb.from('lessons').update({ status: 'planned', rescheduled_to: null }).eq('id', prev.id));
+        closeFn(); await refresh({ silent: true });
+        toast('Заняття повернуто на місце: ' + shortDate.format(new Date(ts)) + ', ' + fmtTime(ts) + '. Зайвих записів немає.');
+        return;
+      }
       var row = { kind: 'lesson', student_id: l.student_id, package_id: l.package_id || null, starts_at: new Date(ts).toISOString(), duration_min: l.duration_min, status: 'planned' };
       var insRes = await sb.from('lessons').insert(row).select().single();
       if (insRes.error) {
@@ -832,6 +842,38 @@
     }
     closeFn(); await refresh({ silent: true });
     toast('Перенесено на ' + shortDate.format(new Date(ts)) + ', ' + fmtTime(ts) + '.');
+  }
+
+  // Скасувати перенесення: нове заняття видаляється, старе повертається в заплановані
+  async function undoReschedule(l, closeFn) {
+    var tgt = null;
+    if (l.rescheduled_to) {
+      var r = await sb.from('lessons').select('*').eq('id', l.rescheduled_to);
+      if (r.error) throw r.error;
+      tgt = (r.data || [])[0] || null;
+    }
+    if (tgt && tgt.status !== 'planned') {
+      toast('Нове заняття вже має статус «' + (LESSON_STATUS_TEXT[tgt.status] || tgt.status) + '». Спершу поверни його в заплановані або видали, тоді скасовуй перенесення.', { error: true, ms: 9000 });
+      closeFn();
+      return;
+    }
+    if (tgt) must(await sb.from('lessons').delete().eq('id', tgt.id));
+    var up = await sb.from('lessons').update({ status: 'planned', rescheduled_to: null }).eq('id', l.id);
+    if (up.error) {
+      if (up.error.code === '23505') { toast('На цей час у учня вже є інше заняття, тому старе повернути не можна.', { error: true, ms: 9000 }); closeFn(); return; }
+      throw up.error;
+    }
+    closeFn(); await refresh({ silent: true });
+    toast('Перенесення скасовано, заняття повернуто на ' + shortDate.format(new Date(l.starts_at)) + ', ' + fmtTime(new Date(l.starts_at).getTime()) + '.');
+  }
+  function openUndoReschedule(l) {
+    var close;
+    var ms = new Date(l.starts_at).getTime();
+    var go = actButton('primary', 'Скасувати перенесення', function () { return undoReschedule(l, close); });
+    close = openModal('Скасувати перенесення?', lessonWho(l) + ', ' + fmtDMY(kyivDateStr(ms)) + ', ' + fmtTime(ms),
+      h('div', { class: 'stack' },
+        h('p', { class: 'note', text: 'Підходить, якщо переніс(ла) помилково. Заняття, на яке його переносили, буде прибране, а це повернеться в розклад зі статусом «Заплановано».' }),
+        go, h('button', { class: 'btn ghost', type: 'button', text: 'Лишити як є', onclick: function () { close(); } })));
   }
 
   async function openCancelDialog(l) {
@@ -1344,7 +1386,8 @@
             return h('li', { class: 'item' },
               h('div', { class: 'item-main' },
                 h('div', { text: fmtDMY(kyivDateStr(ms)) + ', ' + fmtTime(ms) }),
-                l.notes ? h('div', { class: 'item-sub prewrap', text: l.notes }) : null),
+                l.notes ? h('div', { class: 'item-sub prewrap', text: l.notes }) : null,
+                l.status === 'rescheduled' && l.kind !== 'consultation' ? h('div', { class: 'item-actions left' }, h('button', { class: 'btn link', type: 'button', text: 'Скасувати перенесення', onclick: function () { openUndoReschedule(l); } })) : null),
               h('span', { class: 'tag ' + ((STATUS[l.status] || {}).cls || 'muted'), text: LESSON_STATUS_TEXT[l.status] || l.status }));
           })), pastL.length > 5 ? h('button', { class: 'btn ghost small more-btn', type: 'button', text: S.cardAll ? 'Згорнути' : 'Показати всі (' + pastL.length + ')', onclick: function () { S.cardAll = !S.cardAll; render(); } }) : null)
         : h('p', { class: 'item-sub', text: 'Занять ще немає.' });
@@ -2893,6 +2936,8 @@
         actions.append(h('button', { class: 'btn link', type: 'button', text: 'Змінити', onclick: function () { openLessonForm({ edit: l }); } }));
         actions.append(h('button', { class: 'btn link', type: 'button', text: 'Видалити', onclick: function () { openDeleteLesson(l); } }));
       }
+    } else if (l.status === 'rescheduled' && manage && l.kind !== 'consultation') {
+      actions.append(h('button', { class: 'btn link', type: 'button', text: 'Скасувати перенесення', onclick: function () { openUndoReschedule(l); } }));
     } else if (l.status === 'done') {
       actions.append(h('button', { class: 'btn link', type: 'button', text: l.notes ? 'Змінити нотатку' : 'Додати нотатку', onclick: function () { openNoteDialog(l); } }));
       actions.append(actButton('link', 'Повернути в заплановані', function () { return undoDone(l); }));
