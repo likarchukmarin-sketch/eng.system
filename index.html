@@ -847,19 +847,26 @@
     if (/youtube\.com$|youtu\.be$/.test(host)) return 'Відео';
     return host;
   }
+  function readLessonMeta(txt) {
+    var m = txt.match(/<script[^>]*id=["']lesson-meta["'][^>]*>([\s\S]*?)<\/script>/i);
+    if (!m) return null;
+    try { var d = JSON.parse(m[1]); return d && typeof d === 'object' ? d : null; } catch (e) { return null; }
+  }
   async function guessTitle(url) {
-    // повертає { title, fromPage }
+    // повертає { title, fromPage, meta }
     try {
       var ctl = new AbortController();
-      var timer = setTimeout(function () { ctl.abort(); }, 4000);
+      var timer = setTimeout(function () { ctl.abort(); }, 8000);
       var r = await fetch(url, { signal: ctl.signal });
+      var txt = await r.text();
       clearTimeout(timer);
-      var txt = (await r.text()).slice(0, 60000);
-      var m = txt.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      var meta = readLessonMeta(txt);
+      var m = txt.slice(0, 20000).match(/<title[^>]*>([\s\S]*?)<\/title>/i);
       var t = m ? m[1].replace(/\s+/g, ' ').trim() : '';
-      if (t && t.length <= 90 && !/^(sign in|вхід|google drive|404)/i.test(t)) return { title: t, fromPage: true };
+      if (meta && meta.title) t = String(meta.title);
+      if (t && t.length <= 90 && !/^(sign in|вхід|google drive|404)/i.test(t)) return { title: t, fromPage: true, meta: meta };
     } catch (e) { /* CORS або немає мережі: беремо назву за адресою */ }
-    return { title: hostTitle(url), fromPage: false };
+    return { title: hostTitle(url), fromPage: false, meta: null };
   }
 
   async function openContentDialog(l) {
@@ -885,12 +892,45 @@
     grammar.value = l.grammar || '';
     var tags = h('input', { type: 'text', 'aria-label': 'Теги', placeholder: 'Speaking, Travel' });
     tags.value = (l.tags || []).join(', ');
+    var tagChips = h('div', { class: 'words-list' });
+    function tagList() { return tags.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean); }
+    function drawTagChips() {
+      var cur = tagList().map(function (x) { return x.toLowerCase(); });
+      tagChips.replaceChildren.apply(tagChips, ['Розмова', 'Лексика', 'Граматика', 'Аудіювання', 'Читання', 'Письмо'].map(function (name) {
+        var on = cur.indexOf(name.toLowerCase()) > -1;
+        var b = h('button', { class: 'btn ' + (on ? 'primary' : 'ghost'), type: 'button', text: name, 'aria-pressed': on ? 'true' : 'false' });
+        b.addEventListener('click', function () {
+          var list = tagList();
+          var i = list.map(function (x) { return x.toLowerCase(); }).indexOf(name.toLowerCase());
+          if (i > -1) list.splice(i, 1); else list.push(name);
+          tags.value = list.join(', ');
+          drawTagChips();
+        });
+        return b;
+      }));
+    }
+    tags.addEventListener('input', drawTagChips);
+    drawTagChips();
     var comment = h('textarea', { 'aria-label': 'Коментар для студента', placeholder: 'Що вийшло, що повторити. Студент це побачить.' });
     comment.value = l.student_comment || '';
     comment.style.minHeight = '84px';
     var hw = h('textarea', { 'aria-label': 'Домашнє', placeholder: 'Напр.: Розділ 4 інтерактивного уроку' });
     hw.value = l.homework || '';
     hw.style.minHeight = '64px';
+
+    function applyMeta(meta) {
+      var filled = false;
+      if (meta.topic && !topic.value.trim()) { topic.value = String(meta.topic).slice(0, 160); filled = true; }
+      if (meta.grammar && !grammar.value.trim()) { grammar.value = String(meta.grammar).slice(0, 200); filled = true; }
+      if (Array.isArray(meta.tags) && meta.tags.length && !tags.value.trim()) { tags.value = meta.tags.slice(0, 8).join(', '); drawTagChips(); filled = true; }
+      if (Array.isArray(meta.words) && meta.words.length && !words.value.trim()) {
+        words.value = meta.words.filter(function (w) { return w && w.en && w.uk; }).map(function (w) {
+          return w.en + ' — ' + w.uk + (w.ex ? ' — ' + w.ex : '');
+        }).join('\n');
+        filled = true;
+      }
+      if (filled) { more.open = true; toast('Підтягнуто з уроку: тему, граматику, теги й слова. Перевір і збережи.', { ms: 5000 }); }
+    }
 
     var rowsBox = h('div', { class: 'stack' });
     function addRow(it) {
@@ -910,7 +950,8 @@
         t.placeholder = 'Шукаю назву…';
         var g = await guessTitle(url);
         if (!t.value.trim()) t.value = g.title;
-        if (g.fromPage && !topic.value.trim()) topic.value = g.title;
+        if (g.fromPage && !topic.value.trim()) topic.value = (g.meta && g.meta.topic) || g.title;
+        if (g.meta) applyMeta(g.meta);
         t.placeholder = 'Назва (Конспект)';
       }
       u.addEventListener('change', autoTitle);
@@ -990,7 +1031,7 @@
       h('summary', { text: 'Додатково: тема, граматика, слова, коментар, домашнє' }),
       h('div', { class: 'stack' },
         h('div', { class: 'two-col' }, field('Тема', topic), field('Граматика', grammar)),
-        field('Теги', tags, 'Через кому. Студент може за ними шукати уроки.'),
+        h('div', { class: 'field' }, h('label', { text: 'Теги' }), tags, tagChips, h('p', { class: 'hint-cap', text: 'Натисни на тег або впиши свій через кому. Студент шукатиме за ними уроки.' })),
         field('Коментар для студента', comment),
         field('Домашнє (текстом)', hw),
         h('div', { class: 'field' }, h('label', { text: 'Слова уроку' }), existingWords.length ? wordsList : null, words,
