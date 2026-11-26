@@ -245,6 +245,12 @@ function closeSheet(){$("sheet").classList.remove("on");$("sbg").classList.remov
 $("sbg").onclick=closeSheet;
 (function(){var y0=null,sh=$("sheet");sh.addEventListener("pointerdown",function(e){y0=e.clientY});sh.addEventListener("pointerup",function(e){if(y0!==null&&e.clientY-y0>60&&sh.scrollTop<5)closeSheet();y0=null})})();
 
+/* розмір поточного пакета: кількість занять в останньому оплаченому пакеті (або залишок, якщо він більший) */
+function pkgSize(left){
+  var ps=(D.packages||[]).filter(function(p){return p.paid_at});
+  if(!ps.length)ps=D.packages||[];
+  return Math.max(ps.length?(+ps[0].lessons_count||0):0,left||0);
+}
 /* ----- головна ----- */
 function homeHtml(){
   var s=D.student||{},b=D.balance,nl=D.next_lesson,ls=D.lessons||[];
@@ -259,8 +265,8 @@ function homeHtml(){
   if(chatU)btns+='<a class="btn" href="'+safeUrl(chatU)+'" target="_blank" rel="noopener noreferrer">'+IC.chat+' Чат</a>';
   if(btns)h+='<div class="btns">'+btns+'</div>';
   h+='</div>';
-  if(b){var low=b.left<=2,tot=Math.max(b.bought||0,b.left||0,1),pc=Math.max(0,Math.min(100,Math.round(b.left*100/tot)));
-    h+='<div class="pkg'+(low?' low':'')+'" data-go="3"><div class="pk1"><b>'+(low?(b.left<=0?"Пакет закінчився":"Пакет скоро закінчується"):"Мій пакет")+'</b><span><i>'+esc(b.left)+' із '+esc(tot)+'</i> занять залишилось</span></div><div class="pkbar"><u style="width:'+pc+'%"></u></div>'+(low?'<p>Щоб заняття не зупинялись, напиши Марині про оплату наступного пакета.</p>':'')+'</div>';}
+  if(b){var low=b.left<=2,tot=pkgSize(b.left),pc=tot?Math.max(0,Math.min(100,Math.round(b.left*100/tot))):0;
+    h+='<div class="pkg'+(low?' low':'')+'" data-go="3"><div class="pk1"><b>'+(low?(b.left<=0?"Пакет закінчився":"Пакет скоро закінчується"):"Мій пакет")+'</b><span><i>'+esc(b.left)+(tot?' із '+esc(tot):'')+'</i> занять залишилось</span></div><div class="pkbar"><u style="width:'+pc+'%"></u></div>'+(low?'<p>Щоб заняття не зупинялись, напиши Марині про оплату наступного пакета.</p>':'')+'</div>';}
   h+='<button class="wchip" id="wchip" hidden><em>'+IC.spark+'</em><span><i>Слово дня · </i><b id="wchipW"></b></span><u>›</u></button>';
   h+='<div class="bento">';
   if((D.words||[]).length)h+='<div class="tile wide" data-go="2"><em>'+IC.abc+'</em><div><b>Слова на сьогодні</b><span id="todayN"></span></div><u>›</u></div>';
