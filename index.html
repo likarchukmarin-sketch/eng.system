@@ -430,6 +430,14 @@
     .more-sheet a { border-radius: 8px; }
     .more-sheet a[aria-current="page"] { background: var(--green-soft); }
   }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .content-row { display: grid; grid-template-columns: 1fr 1.6fr 120px 40px; gap: 8px; }
+  .content-row .btn { padding: 0; min-height: 44px; }
+  .words-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chip-w { display: inline-flex; align-items: center; gap: 4px; background: var(--green-soft); color: var(--green-deep); border-radius: 999px; padding: 4px 6px 4px 12px; font-size: .9rem; }
+  .chip-x { border: 0; background: transparent; cursor: pointer; font-size: 1.1rem; line-height: 1; min-width: 28px; min-height: 28px; border-radius: 50%; }
+  .hint-cap { color: var(--muted); font-size: .88rem; margin: 6px 0 0; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } .content-row { grid-template-columns: 1fr 1fr; } .content-row input:nth-child(2) { grid-column: 1 / -1; order: 3; } .content-row select { order: 2; } }
 </style>
 </head>
 <body>
@@ -802,6 +810,155 @@
     var skip = h('button', { class: 'btn ghost', type: 'button', text: 'Закрити', onclick: function () { close(); } });
     var who = l.kind === 'consultation' ? l.guest_name : ((S.studentMap[l.student_id] || {}).name || '');
     close = openModal('Нотатка до заняття', who + ', ' + fmtTime(new Date(l.starts_at).getTime()), h('div', { class: 'stack' }, ta, h('div', { class: 'slot-actions' }, save, skip)));
+  }
+
+  // ================= Матеріали для студента (вікно в картці заняття) =================
+  var ITEM_ROLES = { material: 'Матеріал', homework: 'Домашнє', practice: 'Практика' };
+
+  function parseWordLines(text) {
+    var ok = [], bad = [], seen = {};
+    String(text || '').split(/\r?\n/).forEach(function (raw) {
+      var line = raw.trim();
+      if (!line) return;
+      var p = line.split(/\s+[—–-]\s+|\s*\|\s*|\t/).map(function (x) { return x.trim(); });
+      var en = p[0], uk = p[1], ex = p.slice(2).join(' — ').trim();
+      if (!en || !uk) { bad.push(line); return; }
+      var key = en.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      ok.push({ en: en.slice(0, 80), uk: uk.slice(0, 120), example: ex ? ex.slice(0, 200) : null });
+    });
+    return { ok: ok, bad: bad };
+  }
+
+  function normUrl(u) {
+    u = String(u || '').trim();
+    if (!u) return '';
+    return /^https?:\/\//i.test(u) ? u : 'https://' + u;
+  }
+
+  async function openContentDialog(l) {
+    var stu = S.studentMap[l.student_id] || {};
+    var itemsRes = await sb.from('lesson_items').select('*').eq('lesson_id', l.id).order('sort_order', { ascending: true });
+    var wordsRes = await sb.from('words').select('id,en,uk,example').eq('lesson_id', l.id).order('created_at', { ascending: true });
+    if (itemsRes.error || wordsRes.error) {
+      var er = itemsRes.error || wordsRes.error;
+      console.error(er);
+      toast(er.code === '42501' ? 'Немає доступу до матеріалів. Спершу запусти файл teacher_content.sql у Supabase.' : 'Не вдалося відкрити матеріали. Перевір інтернет.', { error: true });
+      return;
+    }
+    var existingWords = (wordsRes.data || []).slice();
+    var removedWordIds = [];
+    var close;
+
+    function field(label, control, hint) {
+      return h('div', { class: 'field' }, h('label', { text: label }), control, hint ? h('p', { class: 'hint-cap', text: hint }) : null);
+    }
+    var topic = h('input', { type: 'text', 'aria-label': 'Тема', placeholder: 'Напр.: On the way' });
+    topic.value = l.topic || '';
+    var grammar = h('input', { type: 'text', 'aria-label': 'Граматика', placeholder: 'Напр.: Directions · asking the way' });
+    grammar.value = l.grammar || '';
+    var tags = h('input', { type: 'text', 'aria-label': 'Теги', placeholder: 'Speaking, Travel' });
+    tags.value = (l.tags || []).join(', ');
+    var comment = h('textarea', { 'aria-label': 'Коментар для студента', placeholder: 'Що вийшло, що повторити. Студент це побачить.' });
+    comment.value = l.student_comment || '';
+    comment.style.minHeight = '84px';
+    var hw = h('textarea', { 'aria-label': 'Домашнє', placeholder: 'Напр.: Розділ 4 інтерактивного уроку' });
+    hw.value = l.homework || '';
+    hw.style.minHeight = '64px';
+
+    var rowsBox = h('div', { class: 'stack' });
+    function addRow(it) {
+      it = it || { role: 'material', title: '', url: '' };
+      var t = h('input', { type: 'text', 'aria-label': 'Назва кнопки', placeholder: 'Назва (Конспект)' });
+      t.value = it.title || '';
+      var u = h('input', { type: 'text', 'aria-label': 'Посилання', placeholder: 'https://…' });
+      u.value = it.url || '';
+      var sel = h('select', { 'aria-label': 'Тип' });
+      Object.keys(ITEM_ROLES).forEach(function (k) { var o = h('option', { value: k, text: ITEM_ROLES[k] }); sel.append(o); });
+      sel.value = it.role || 'material';
+      var del = h('button', { class: 'btn ghost', type: 'button', 'aria-label': 'Прибрати посилання', text: '×' });
+      var row = h('div', { class: 'content-row' }, t, u, sel, del);
+      row._get = function () { return { title: t.value.trim(), url: u.value.trim(), role: sel.value }; };
+      del.addEventListener('click', function () { row.remove(); });
+      rowsBox.append(row);
+    }
+    (itemsRes.data || []).forEach(addRow);
+    if (!(itemsRes.data || []).length) addRow({ role: 'material', title: 'Конспект' });
+    var addBtn = h('button', { class: 'btn link', type: 'button', text: '+ Додати посилання', onclick: function () { addRow(); } });
+
+    var wordsList = h('div', { class: 'words-list' });
+    function drawWords() {
+      wordsList.replaceChildren.apply(wordsList, existingWords.map(function (w) {
+        var x = h('button', { class: 'chip-x', type: 'button', 'aria-label': 'Прибрати слово ' + w.en, text: '×' });
+        x.addEventListener('click', function () {
+          removedWordIds.push(w.id);
+          existingWords = existingWords.filter(function (y) { return y.id !== w.id; });
+          drawWords();
+        });
+        return h('span', { class: 'chip-w' }, h('b', { text: w.en }), ' · ' + w.uk + ' ', x);
+      }));
+    }
+    drawWords();
+    var words = h('textarea', { 'aria-label': 'Нові слова', placeholder: 'boarding pass — посадковий талон — Show your boarding pass.\nluggage — багаж' });
+    words.style.minHeight = '96px';
+
+    var statusNote = l.status === 'done'
+      ? 'Заняття вже проведено, тому студент побачить зміни одразу.'
+      : 'Студент побачить усе це, коли ти позначиш заняття як «Проведено». Кнопки з’являться, якщо додано хоча б одне посилання.';
+
+    var save = actButton('primary', 'Зберегти', async function () {
+      var urls = [];
+      var bad = null;
+      [].forEach.call(rowsBox.children, function (row) {
+        var v = row._get();
+        if (!v.title && !v.url) return;
+        var url = normUrl(v.url);
+        if (!url || !/^https?:\/\/\S+\.\S+/.test(url)) { bad = 'Перевір посилання' + (v.title ? ' «' + v.title + '»' : '') + '.'; return; }
+        urls.push({ role: v.role, title: v.title || 'Матеріал', url: url });
+      });
+      if (bad) { toast(bad, { error: true }); return; }
+      var pw = parseWordLines(words.value);
+      var tagList = tags.value.split(',').map(function (x) { return x.trim(); }).filter(Boolean).slice(0, 8);
+      must(await sb.from('lessons').update({
+        topic: topic.value.trim() || null,
+        grammar: grammar.value.trim() || null,
+        tags: tagList,
+        student_comment: comment.value.trim() || null,
+        homework: hw.value.trim() || null
+      }).eq('id', l.id));
+      must(await sb.from('lesson_items').delete().eq('lesson_id', l.id));
+      if (urls.length) must(await sb.from('lesson_items').insert(urls.map(function (r, i) { return { lesson_id: l.id, role: r.role, title: r.title, url: r.url, sort_order: i }; })));
+      if (removedWordIds.length) must(await sb.from('words').delete().in('id', removedWordIds));
+      var added = 0, skipped = 0;
+      if (pw.ok.length) {
+        var have = must(await sb.from('words').select('en').eq('student_id', l.student_id)) || [];
+        var haveSet = {};
+        have.forEach(function (w) { haveSet[String(w.en).toLowerCase()] = true; });
+        var fresh = pw.ok.filter(function (w) { return !haveSet[w.en.toLowerCase()]; });
+        skipped = pw.ok.length - fresh.length;
+        if (fresh.length) {
+          must(await sb.from('words').insert(fresh.map(function (w) { return { student_id: l.student_id, lesson_id: l.id, en: w.en, uk: w.uk, example: w.example, added_by: 'teacher' }; })));
+          added = fresh.length;
+        }
+      }
+      close();
+      await refresh({ silent: true });
+      var msg = 'Збережено.' + (added ? ' Нових слів: ' + added + '.' : '') + (skipped ? ' Вже були у студента: ' + skipped + '.' : '') + (pw.bad.length ? ' Не розпізнано рядків: ' + pw.bad.length + ' (потрібно: слово — переклад).' : '');
+      toast(msg + (l.status === 'done' ? '' : ' Студент побачить після «Проведено».'), { ms: 7000 });
+    });
+    var cancel = h('button', { class: 'btn ghost', type: 'button', text: 'Закрити', onclick: function () { close(); } });
+    var body = h('div', { class: 'stack' },
+      h('p', { class: 'hint-cap', text: statusNote }),
+      h('div', { class: 'two-col' }, field('Тема', topic), field('Граматика', grammar)),
+      field('Теги', tags, 'Через кому. Студент може за ними шукати уроки.'),
+      field('Коментар для студента', comment),
+      field('Домашнє (текстом)', hw),
+      h('div', { class: 'field' }, h('label', { text: 'Матеріали (кнопки в кабінеті)' }), rowsBox, addBtn),
+      h('div', { class: 'field' }, h('label', { text: 'Слова уроку' }), existingWords.length ? wordsList : null, words,
+        h('p', { class: 'hint-cap', text: 'Нові слова: по одному в рядок, у форматі слово — переклад — приклад. Приклад можна не писати.' })),
+      h('div', { class: 'slot-actions' }, save, cancel));
+    close = openModal('Матеріали для студента', (stu.name || '') + ', ' + fmtTime(new Date(l.starts_at).getTime()), body, { wide: true });
   }
 
   async function countReschedulesThisMonth(studentId) {
@@ -2931,6 +3088,7 @@
     var actions = h('div', { class: 'slot-actions' });
     if (l.status === 'planned') {
       actions.append(actButton('primary small', 'Проведено', function () { return markDone(l); }, 'check'));
+      if (!consult && l.student_id) actions.append(actButton('link', 'Матеріали для студента', function () { return openContentDialog(l); }));
       actions.append(h('button', { class: 'btn link', type: 'button', text: 'Скасувати або перенести', onclick: function () { openCancelDialog(l).catch(fail); } }));
       if (manage && !l.from_schedule) {
         actions.append(h('button', { class: 'btn link', type: 'button', text: 'Змінити', onclick: function () { openLessonForm({ edit: l }); } }));
@@ -2940,6 +3098,7 @@
       actions.append(h('button', { class: 'btn link', type: 'button', text: 'Скасувати перенесення', onclick: function () { openUndoReschedule(l); } }));
     } else if (l.status === 'done') {
       actions.append(h('button', { class: 'btn link', type: 'button', text: l.notes ? 'Змінити нотатку' : 'Додати нотатку', onclick: function () { openNoteDialog(l); } }));
+      if (!consult && l.student_id) actions.append(actButton('link', 'Матеріали для студента', function () { return openContentDialog(l); }));
       actions.append(actButton('link', 'Повернути в заплановані', function () { return undoDone(l); }));
     }
     return h('li', { class: 'slot' + (isNext ? ' next' : '') + (l.status === 'done' ? ' done' : '') + (l.status === 'lost' ? ' lost' : '') + (voided ? ' void' : '') },
@@ -3249,3 +3408,4 @@
 </script>
 </body>
 </html>
+  
